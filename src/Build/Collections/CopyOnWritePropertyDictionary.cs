@@ -347,9 +347,9 @@ namespace Microsoft.Build.Collections
         /// <param name="other">An enumerator over the properties to add.</param>
         public void ImportProperties(IEnumerable<T> other)
         {
-            _backing = _backing.SetItems(Items());
+            _backing = _backing.SetItems(Items(other));
 
-            IEnumerable<KeyValuePair<string, T>> Items()
+            static IEnumerable<KeyValuePair<string, T>> Items(IEnumerable<T> other)
             {
                 foreach (T property in other)
                 {
