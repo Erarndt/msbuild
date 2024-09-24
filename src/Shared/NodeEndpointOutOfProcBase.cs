@@ -11,6 +11,9 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
 using System.Threading;
+#if NET451_OR_GREATER
+using System.Threading.Tasks;
+#endif
 using Microsoft.Build.Internal;
 using Microsoft.Build.Shared;
 #if FEATURE_SECURITY_PERMISSIONS || FEATURE_PIPE_SECURITY
@@ -511,7 +514,7 @@ namespace Microsoft.Build.BackEnd
             }
         }
 
-        private void RunReadLoop(Stream localReadPipe, Stream localWritePipe,
+        private void RunReadLoop(BufferedReadStream bufferedReadStream, Stream localWritePipe,
             ConcurrentQueue<INodePacket> localPacketQueue, AutoResetEvent localPacketAvailable, AutoResetEvent localTerminatePacketPump)
         {
             // Ordering of the wait handles is important.  The first signalled wait handle in the array
@@ -521,9 +524,14 @@ namespace Microsoft.Build.BackEnd
             CommunicationsUtilities.Trace("Entering read loop.");
             byte[] headerByte = new byte[5];
 #if FEATURE_APM
-            IAsyncResult result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#if NET451_OR_GREATER
+            Task<int> readTask = bufferedReadStream.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
 #else
-            Task<int> readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
+            IAsyncResult result = bufferedReadStream.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#endif
+
+#else
+            Task<int> readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
 #endif
 
             bool exitLoop = false;
@@ -531,13 +539,21 @@ namespace Microsoft.Build.BackEnd
             {
                 // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
                 // packets to be sent by other threads which are shutting down, such as the logging thread.
-                WaitHandle[] handles = new WaitHandle[] {
+                WaitHandle[] handles =
+                [
 #if FEATURE_APM
+                    #if NET451_OR_GREATER
+                    ((IAsyncResult)readTask).AsyncWaitHandle,
+#else
                     result.AsyncWaitHandle,
+#endif
+
 #else
                     ((IAsyncResult)readTask).AsyncWaitHandle,
 #endif
-                    localPacketAvailable, localTerminatePacketPump };
+                    localPacketAvailable,
+                    localTerminatePacketPump,
+                ];
 
                 int waitId = WaitHandle.WaitAny(handles);
                 switch (waitId)
@@ -548,7 +564,12 @@ namespace Microsoft.Build.BackEnd
                             try
                             {
 #if FEATURE_APM
-                                bytesRead = localReadPipe.EndRead(result);
+#if NET451_OR_GREATER
+                                bytesRead = readTask.Result;
+#else
+                                bytesRead = bufferedReadStream.EndRead(result);
+#endif
+
 #else
                                 bytesRead = readTask.Result;
 #endif
@@ -595,7 +616,7 @@ namespace Microsoft.Build.BackEnd
 
                             try
                             {
-                                _packetFactory.DeserializeAndRoutePacket(0, packetType, BinaryTranslator.GetReadTranslator(localReadPipe, _sharedReadBuffer));
+                                _packetFactory.DeserializeAndRoutePacket(0, packetType, BinaryTranslator.GetReadTranslator(bufferedReadStream, _sharedReadBuffer));
                             }
                             catch (Exception e)
                             {
@@ -608,9 +629,14 @@ namespace Microsoft.Build.BackEnd
                             }
 
 #if FEATURE_APM
-                            result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#if NET451_OR_GREATER
+                            readTask = bufferedReadStream.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
 #else
-                            readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
+                            result = bufferedReadStream.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#endif
+
+#else
+                            readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
 #endif
                         }
 
