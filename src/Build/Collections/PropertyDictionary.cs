@@ -542,19 +542,20 @@ namespace Microsoft.Build.Collections
 
         internal IEnumerable<TResult> Filter<TResult>(Func<T, bool> filter, Func<T, TResult> selector)
         {
-            List<TResult> result = new();
             lock (_properties)
             {
-                foreach (T property in (ICollection<T>)_properties)
+                ICollection<T> propertiesCollection = (ICollection<T>)_properties;
+                List<TResult> result = new(propertiesCollection.Count);
+                foreach (T property in propertiesCollection)
                 {
                     if (filter(property))
                     {
                         result.Add(selector(property));
                     }
                 }
-            }
 
-            return result;
+                return result;
+            }
         }
     }
 }

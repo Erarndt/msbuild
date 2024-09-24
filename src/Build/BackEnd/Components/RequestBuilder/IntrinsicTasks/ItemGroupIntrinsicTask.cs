@@ -510,7 +510,7 @@ namespace Microsoft.Build.BackEnd
         /// <returns>A list of matching items</returns>
         private HashSet<string> EvaluateExcludePaths(IReadOnlyList<string> excludes, ElementLocation excludeLocation)
         {
-            HashSet<string> excludesUnescapedForComparison = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> excludesUnescapedForComparison = new HashSet<string>(excludes.Count, StringComparer.OrdinalIgnoreCase);
             foreach (string excludeSplit in excludes)
             {
                 string[] excludeSplitFiles = EngineFileUtilities.GetFileListUnescaped(

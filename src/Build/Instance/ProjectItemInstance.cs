@@ -1104,8 +1104,9 @@ namespace Microsoft.Build.Execution
 
             private IEnumerable<KeyValuePair<string, string>> EnumerateMetadata(ICopyOnWritePropertyDictionary<ProjectMetadataInstance> list)
             {
-                foreach (var projectMetadataInstance in list.Values)
+                foreach (var kvp in (IDictionary<string, ProjectMetadataInstance>)list)
                 {
+                    var projectMetadataInstance = kvp.Value;
                     if (projectMetadataInstance != null)
                     {
                         yield return new KeyValuePair<string, string>(projectMetadataInstance.Name, projectMetadataInstance.EvaluatedValue);
@@ -1442,9 +1443,7 @@ namespace Microsoft.Build.Execution
                 {
                     // The destination implements IMetadataContainer so we can use the ImportMetadata bulk-set operation.
                     IEnumerable<ProjectMetadataInstance> metadataEnumerable = MetadataCollection;
-                    IEnumerable<KeyValuePair<string, string>> metadataToImport = metadataEnumerable
-                        .Where(metadatum => string.IsNullOrEmpty(destinationItem.GetMetadata(metadatum.Name)))
-                        .Select(metadatum => new KeyValuePair<string, string>(metadatum.Name, GetMetadataEscaped(metadatum.Name)));
+                    IEnumerable<KeyValuePair<string, string>> metadataToImport = GetMetadataToImportEnumerable(destinationItem, metadataEnumerable);
 
 #if FEATURE_APPDOMAIN
                     if (RemotingServices.IsTransparentProxy(destinationItem))
@@ -1479,6 +1478,10 @@ namespace Microsoft.Build.Execution
                         destinationItem.SetMetadata("OriginalItemSpec", _includeEscaped);
                     }
                 }
+
+                IEnumerable<KeyValuePair<string, string>> GetMetadataToImportEnumerable(ITaskItem destinationItem, IEnumerable<ProjectMetadataInstance> metadataEnumerable) => metadataEnumerable
+                                        .Where(metadatum => string.IsNullOrEmpty(destinationItem.GetMetadata(metadatum.Name)))
+                                        .Select(metadatum => new KeyValuePair<string, string>(metadatum.Name, GetMetadataEscaped(metadatum.Name)));
             }
 
             /// <summary>
@@ -1781,13 +1784,7 @@ namespace Microsoft.Build.Execution
                         int count = translator.Reader.ReadInt32();
                         if (count > 0)
                         {
-                            IEnumerable<ProjectMetadataInstance> metaData =
-                                Enumerable.Range(0, count).Select(_ =>
-                                {
-                                    int key = translator.Reader.ReadInt32();
-                                    int value = translator.Reader.ReadInt32();
-                                    return new ProjectMetadataInstance(interner.GetString(key), interner.GetString(value), allowItemSpecModifiers: true);
-                                });
+                            IEnumerable<ProjectMetadataInstance> metaData = GetMetadataEnumerable(translator, interner, count);
                             _directMetadata = new CopyOnWritePropertyDictionary<ProjectMetadataInstance>();
                             _directMetadata.ImportProperties(metaData);
                         }
@@ -1795,6 +1792,16 @@ namespace Microsoft.Build.Execution
                         {
                             _directMetadata = null;
                         }
+                    }
+                }
+
+                static IEnumerable<ProjectMetadataInstance> GetMetadataEnumerable(ITranslator translator, LookasideStringInterner interner, int count)
+                {
+                    for (int i = 0; i < count; ++i)
+                    {
+                        int key = translator.Reader.ReadInt32();
+                        int value = translator.Reader.ReadInt32();
+                        yield return new ProjectMetadataInstance(interner.GetString(key), interner.GetString(value), allowItemSpecModifiers: true);
                     }
                 }
             }
