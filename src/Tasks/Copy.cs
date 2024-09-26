@@ -287,13 +287,7 @@ namespace Microsoft.Build.Tasks
                 MakeFileWriteable(destinationFileState, true);
             }
 
-            if (!Traits.Instance.EscapeHatches.CopyWithoutDelete &&
-                destinationFileState.FileExists &&
-                !destinationFileState.IsReadOnly)
-            {
-                FileUtilities.DeleteNoThrow(destinationFileState.Name);
-            }
-
+            bool destinationFileDeleted = false;
             bool symbolicLinkCreated = false;
             bool hardLinkCreated = false;
             string errorMessage = string.Empty;
@@ -301,6 +295,7 @@ namespace Microsoft.Build.Tasks
             // Create hard links if UseHardlinksIfPossible is true
             if (UseHardlinksIfPossible)
             {
+                DeleteDestinationFile(destinationFileState, ref destinationFileDeleted);
                 TryCopyViaLink(HardLinkComment, MessageImportance.Normal, sourceFileState, destinationFileState, out hardLinkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethods.MakeHardLink(destination, source, ref errorMessage, Log));
                 if (!hardLinkCreated)
                 {
@@ -319,6 +314,7 @@ namespace Microsoft.Build.Tasks
             // Create symbolic link if UseSymboliclinksIfPossible is true and hard link is not created
             if (!hardLinkCreated && UseSymboliclinksIfPossible)
             {
+                DeleteDestinationFile(destinationFileState, ref destinationFileDeleted);
                 TryCopyViaLink(SymbolicLinkComment, MessageImportance.Normal, sourceFileState, destinationFileState, out symbolicLinkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethodsShared.MakeSymbolicLink(destination, source, ref errorMessage));
                 if (!symbolicLinkCreated)
                 {
@@ -360,6 +356,18 @@ namespace Microsoft.Build.Tasks
             WroteAtLeastOneFile = true;
 
             return true;
+
+            static void DeleteDestinationFile(FileState destinationFileState, ref bool destinationFileDeleted)
+            {
+                if (!destinationFileDeleted &&
+                    !Traits.Instance.EscapeHatches.CopyWithoutDelete &&
+                    destinationFileState.FileExists &&
+                    !destinationFileState.IsReadOnly)
+                {
+                    FileUtilities.DeleteNoThrow(destinationFileState.Name);
+                    destinationFileDeleted = true;
+                }
+            }
         }
 
         private void TryCopyViaLink(string linkComment, MessageImportance messageImportance, FileState sourceFileState, FileState destinationFileState, out bool linkCreated, ref string errorMessage, Func<string, string, string, bool> createLink)
