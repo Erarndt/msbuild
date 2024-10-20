@@ -503,7 +503,13 @@ namespace Microsoft.Build.Logging
 #if NET
             => Environment.ProcessId;
 #else
-            => System.Diagnostics.Process.GetCurrentProcess().Id;
+        {
+            get
+            {
+                using System.Diagnostics.Process currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                return currentProcess.Id;
+            }
+        }
 #endif
     }
 }

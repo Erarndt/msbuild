@@ -431,12 +431,16 @@ namespace Microsoft.Build.Shared
             // an unmanaged application (for example, using custom CLR hosting).
             if (AssemblyUtilities.EntryAssembly == null)
             {
-                return Process.GetCurrentProcess().MainModule.FileName;
+                using Process currentProcess = Process.GetCurrentProcess();
+
+                return currentProcess.MainModule.FileName;
             }
 
             return AssemblyUtilities.GetAssemblyLocation(AssemblyUtilities.EntryAssembly);
 #else
-            return Process.GetCurrentProcess().MainModule.FileName;
+            using Process currentProcess = Process.GetCurrentProcess();
+
+            return currentProcess.MainModule.FileName;
 #endif
         }
 

@@ -535,8 +535,9 @@ namespace Microsoft.Build.BuildEngine
             node = new Node(nodeId, nodeLoggers, engineCallback, parentGlobalProperties, toolsetSearchLocations, parentStartupDirectory);
 
             // Write the initialization complete event out directly
+            using Process currentProcess = Process.GetCurrentProcess();
             LocalCallDescriptorForInitializationComplete callDescriptor =
-                new LocalCallDescriptorForInitializationComplete(Process.GetCurrentProcess().Id);
+                new LocalCallDescriptorForInitializationComplete(currentProcess.Id);
 
             // Post the message indicating that the initialization is complete
             engineCallback.PostMessageToParent(callDescriptor, true);
@@ -552,7 +553,8 @@ namespace Microsoft.Build.BuildEngine
             try
             {
                 // Check if the parent is still there
-                if (Process.GetProcessById(parentProcessId).HasExited)
+                using Process parentProcess = Process.GetProcessById(parentProcessId);
+                if (parentProcess.HasExited)
                 {
                     isParentAlive = false;
                 }
