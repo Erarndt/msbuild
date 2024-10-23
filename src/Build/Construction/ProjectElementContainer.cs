@@ -841,7 +841,9 @@ namespace Microsoft.Build.Construction
                 return false;
             }
 
-            public IEnumerator<T> GetEnumerator() => new Enumerator(_initial, _forwards);
+            public Enumerator GetEnumerator() => new Enumerator(_initial, _forwards);
+
+            IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
 
             IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 

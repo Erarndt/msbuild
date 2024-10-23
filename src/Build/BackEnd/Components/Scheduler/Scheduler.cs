@@ -992,7 +992,8 @@ namespace Microsoft.Build.BackEnd
         {
             if (idleNodes.Contains(InProcNodeId))
             {
-                List<SchedulableRequest> unscheduledRequests = new List<SchedulableRequest>(_schedulingData.UnscheduledRequestsWhichCanBeScheduled);
+                List<SchedulableRequest> unscheduledRequests = new List<SchedulableRequest>(_schedulingData.UnscheduledRequestsCount);
+                unscheduledRequests.AddRange(_schedulingData.UnscheduledRequestsWhichCanBeScheduled);
                 foreach (SchedulableRequest request in unscheduledRequests)
                 {
                     if (CanScheduleRequestToNode(request, InProcNodeId) && shouldBeScheduled(request))
@@ -1931,7 +1932,8 @@ namespace Microsoft.Build.BackEnd
 
             // Now determine which unscheduled requests have results.  Reporting these may cause an blocked request to become ready
             // and potentially allow us to continue it.
-            List<SchedulableRequest> unscheduledRequests = new List<SchedulableRequest>(_schedulingData.UnscheduledRequests);
+            List<SchedulableRequest> unscheduledRequests = new List<SchedulableRequest>(_schedulingData.UnscheduledRequestsCount);
+            unscheduledRequests.AddRange(_schedulingData.UnscheduledRequests);
             foreach (SchedulableRequest request in unscheduledRequests)
             {
                 ResolveRequestFromCacheAndResumeIfPossible(request, responses);
