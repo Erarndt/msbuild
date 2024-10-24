@@ -18,6 +18,8 @@ using Microsoft.Build.Internal;
 using Microsoft.Build.Shared;
 #if FEATURE_SECURITY_PERMISSIONS || FEATURE_PIPE_SECURITY
 using System.Security.AccessControl;
+using System.Collections.Generic;
+
 
 #endif
 #if FEATURE_PIPE_SECURITY && FEATURE_NAMED_PIPE_SECURITY_CONSTRUCTOR
@@ -68,6 +70,17 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         private object _asyncDataMonitor;
 
+#if NET451_OR_GREATER || NETCOREAPP
+        /// <summary>
+        /// Set when a packet is available in the packet queue
+        /// </summary>
+        private AsyncAutoResetEvent _packetAvailable;
+
+        /// <summary>
+        /// Set when the asynchronous packet pump should terminate
+        /// </summary>
+        private AsyncAutoResetEvent _terminatePacketPump;
+#else
         /// <summary>
         /// Set when a packet is available in the packet queue
         /// </summary>
@@ -77,6 +90,7 @@ namespace Microsoft.Build.BackEnd
         /// Set when the asynchronous packet pump should terminate
         /// </summary>
         private AutoResetEvent _terminatePacketPump;
+#endif
 
         /// <summary>
         /// True if this side is gracefully disconnecting.
@@ -119,7 +133,7 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         private BinaryWriter _binaryWriter;
 
-        #endregion
+#endregion
 
         #region INodeEndpoint Events
 
@@ -302,7 +316,9 @@ namespace Microsoft.Build.BackEnd
 #if CLR2COMPATIBILITY
             _terminatePacketPump.Close();
 #else
+#if !NET451_OR_GREATER && !NETCOREAPP
             _terminatePacketPump.Dispose();
+#endif
 #endif
             _pipeServer.Dispose();
             _packetPump = null;
@@ -335,8 +351,13 @@ namespace Microsoft.Build.BackEnd
                 _packetPump = new Thread(PacketPumpProc);
                 _packetPump.IsBackground = true;
                 _packetPump.Name = "OutOfProc Endpoint Packet Pump";
+#if NET451_OR_GREATER || NETCOREAPP
+                _packetAvailable = new AsyncAutoResetEvent();
+                _terminatePacketPump = new AsyncAutoResetEvent();
+#else
                 _packetAvailable = new AutoResetEvent(false);
                 _terminatePacketPump = new AutoResetEvent(false);
+#endif
                 _packetQueue = new ConcurrentQueue<INodePacket>();
                 _packetPump.Start();
             }
@@ -351,8 +372,13 @@ namespace Microsoft.Build.BackEnd
         {
             NamedPipeServerStream localPipeServer = _pipeServer;
 
+#if NET451_OR_GREATER || NETCOREAPP
+            AsyncAutoResetEvent localPacketAvailable = _packetAvailable;
+            AsyncAutoResetEvent localTerminatePacketPump = _terminatePacketPump;
+#else
             AutoResetEvent localPacketAvailable = _packetAvailable;
             AutoResetEvent localTerminatePacketPump = _terminatePacketPump;
+#endif
             ConcurrentQueue<INodePacket> localPacketQueue = _packetQueue;
 
             DateTime originalWaitStartTime = DateTime.UtcNow;
@@ -487,11 +513,17 @@ namespace Microsoft.Build.BackEnd
                 }
             }
 
-            RunReadLoop(
+#if NET451_OR_GREATER || NETCOREAPP
+            RunReadLoopAsync(
                 new BufferedReadStream(_pipeServer),
                 _pipeServer,
+                localPacketQueue, localPacketAvailable, localTerminatePacketPump).GetAwaiter().GetResult();
+#else
+            RunReadLoop(
+            new BufferedReadStream(_pipeServer),
+                _pipeServer,
                 localPacketQueue, localPacketAvailable, localTerminatePacketPump);
-
+#endif
             CommunicationsUtilities.Trace("Ending read loop");
 
             try
@@ -514,8 +546,13 @@ namespace Microsoft.Build.BackEnd
             }
         }
 
-        private void RunReadLoop(BufferedReadStream bufferedReadStream, Stream localWritePipe,
+#if NET451_OR_GREATER || NETCOREAPP
+        private async Task RunReadLoopAsync(BufferedReadStream bufferedReadStream, NamedPipeServerStream localWritePipe,
+            ConcurrentQueue<INodePacket> localPacketQueue, AsyncAutoResetEvent localPacketAvailable, AsyncAutoResetEvent localTerminatePacketPump)
+#else
+        private void RunReadLoop(BufferedReadStream bufferedReadStream, NamedPipeServerStream localWritePipe,
             ConcurrentQueue<INodePacket> localPacketQueue, AutoResetEvent localPacketAvailable, AutoResetEvent localTerminatePacketPump)
+#endif
         {
             // Ordering of the wait handles is important.  The first signalled wait handle in the array
             // will be returned by WaitAny if multiple wait handles are signalled.  We prefer to have the
@@ -523,15 +560,18 @@ namespace Microsoft.Build.BackEnd
             // spammed to the endpoint and it never gets an opportunity to shutdown.
             CommunicationsUtilities.Trace("Entering read loop.");
             byte[] headerByte = new byte[5];
-#if FEATURE_APM
 #if NET451_OR_GREATER
             Task<int> readTask = bufferedReadStream.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
+#elif NETCOREAPP
+            Task<int> readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
 #else
             IAsyncResult result = bufferedReadStream.BeginRead(headerByte, 0, headerByte.Length, null, null);
 #endif
 
-#else
-            Task<int> readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
+#if NET451_OR_GREATER || NETCOREAPP
+            Task packetTask = localPacketAvailable.WaitAsync();
+            Task terminateTask = localTerminatePacketPump.WaitAsync();
+            Task[] loopTasks = [readTask, packetTask, terminateTask];
 #endif
 
             bool exitLoop = false;
@@ -539,23 +579,21 @@ namespace Microsoft.Build.BackEnd
             {
                 // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
                 // packets to be sent by other threads which are shutting down, such as the logging thread.
+#if NET451_OR_GREATER || NETCOREAPP
+                Task completedTask = await Task.WhenAny(loopTasks);
+                int waitId = Array.IndexOf(loopTasks, completedTask);
+#else
                 WaitHandle[] handles =
                 [
-#if FEATURE_APM
-                    #if NET451_OR_GREATER
-                    ((IAsyncResult)readTask).AsyncWaitHandle,
-#else
                     result.AsyncWaitHandle,
-#endif
-
-#else
-                    ((IAsyncResult)readTask).AsyncWaitHandle,
-#endif
                     localPacketAvailable,
                     localTerminatePacketPump,
                 ];
 
                 int waitId = WaitHandle.WaitAny(handles);
+#endif
+
+
                 switch (waitId)
                 {
                     case 0:
@@ -563,15 +601,10 @@ namespace Microsoft.Build.BackEnd
                             int bytesRead = 0;
                             try
                             {
-#if FEATURE_APM
-#if NET451_OR_GREATER
-                                bytesRead = readTask.Result;
+#if NET451_OR_GREATER || NETCOREAPP
+                                bytesRead = await readTask;
 #else
                                 bytesRead = bufferedReadStream.EndRead(result);
-#endif
-
-#else
-                                bytesRead = readTask.Result;
 #endif
                             }
                             catch (Exception e)
@@ -628,15 +661,16 @@ namespace Microsoft.Build.BackEnd
                                 break;
                             }
 
-#if FEATURE_APM
 #if NET451_OR_GREATER
                             readTask = bufferedReadStream.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
+#elif NETCOREAPP
+                            readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
 #else
                             result = bufferedReadStream.BeginRead(headerByte, 0, headerByte.Length, null, null);
 #endif
 
-#else
-                            readTask = CommunicationsUtilities.ReadAsync(bufferedReadStream, headerByte, headerByte.Length);
+#if NET451_OR_GREATER || NETCOREAPP
+                            loopTasks[0] = readTask;
 #endif
                         }
 
@@ -647,8 +681,7 @@ namespace Microsoft.Build.BackEnd
                         try
                         {
                             // Write out all the queued packets.
-                            INodePacket packet;
-                            while (localPacketQueue.TryDequeue(out packet))
+                            while (localPacketQueue.TryDequeue(out INodePacket packet))
                             {
                                 var packetStream = _packetStream;
                                 packetStream.SetLength(0);
@@ -669,8 +702,26 @@ namespace Microsoft.Build.BackEnd
                                 packetStream.Position = 1;
                                 _binaryWriter.Write(packetStreamLength - 5);
 
+#if NET451_OR_GREATER || NETCOREAPP
+#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                                await localWritePipe.WriteAsync(packetStream.GetBuffer(), 0, packetStreamLength, CancellationToken.None);
+
+#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+#else
                                 localWritePipe.Write(packetStream.GetBuffer(), 0, packetStreamLength);
+#endif
                             }
+
+#if NET451_OR_GREATER || NETCOREAPP
+                            if (waitId == 1)
+                            {
+                                loopTasks[1] = localPacketAvailable.WaitAsync();
+                            }
+                            else if (waitId == 2)
+                            {
+                                loopTasks[2] = localTerminatePacketPump.WaitAsync();
+                            }
+#endif
                         }
                         catch (Exception e)
                         {
@@ -699,8 +750,54 @@ namespace Microsoft.Build.BackEnd
             while (!exitLoop);
         }
 
-        #endregion
+#endregion
 
-        #endregion
+#endregion
+
+#if NET451_OR_GREATER || NETCOREAPP
+        internal sealed class AsyncAutoResetEvent
+        {
+            private static readonly Task s_completed = Task.FromResult(true);
+            private readonly System.Collections.Generic.Queue<TaskCompletionSource<bool>> _waits = new();
+            private bool _signaled;
+
+            public Task WaitAsync()
+            {
+                lock (_waits)
+                {
+                    if (_signaled)
+                    {
+                        _signaled = false;
+                        return s_completed;
+                    }
+                    else
+                    {
+                        var tcs = new TaskCompletionSource<bool>();
+                        _waits.Enqueue(tcs);
+                        return tcs.Task;
+                    }
+                }
+            }
+
+            public void Set()
+            {
+                TaskCompletionSource<bool> toRelease = null;
+
+                lock (_waits)
+                {
+                    if (_waits.Count > 0)
+                    {
+                        toRelease = _waits.Dequeue();
+                    }
+                    else if (!_signaled)
+                    {
+                        _signaled = true;
+                    }
+                }
+
+                toRelease?.SetResult(true);
+            }
+        }
+#endif
     }
 }
