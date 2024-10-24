@@ -827,17 +827,16 @@ namespace Microsoft.Build.BackEnd
                 {
                     // average latency between the moment this runs and when the delegate starts
                     // running is about 100-200 microseconds (unless there's thread pool saturation)
-                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(
-                        static async (_, state) =>
+                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(static (_, state) =>
                         {
                             NodeContext context = (NodeContext)state;
                             while (context._packetWriteQueue.TryTake(out var packet))
                             {
-                                await context.SendDataCore(packet);
+                                context.SendDataCore(packet);
                             }
                         },
                         this,
-                        TaskScheduler.Default).Unwrap();
+                        TaskScheduler.Default);
                 }
             }
 
@@ -847,7 +846,7 @@ namespace Microsoft.Build.BackEnd
             /// the _packetWriteDrainTask to serially chain invocations one after another.
             /// </summary>
             /// <param name="packet">The packet to send.</param>
-            private async Task SendDataCore(INodePacket packet)
+            private void SendDataCore(INodePacket packet)
             {
                 MemoryStream writeStream = _writeBufferMemoryStream;
 
@@ -874,10 +873,7 @@ namespace Microsoft.Build.BackEnd
                     for (int i = 0; i < writeStreamLength; i += MaxPacketWriteSize)
                     {
                         int lengthToWrite = Math.Min(writeStreamLength - i, MaxPacketWriteSize);
-
-#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
-                        await _serverToClientStream.WriteAsync(writeStreamBuffer, i, lengthToWrite, System.Threading.CancellationToken.None);
-#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                        _serverToClientStream.Write(writeStreamBuffer, i, lengthToWrite);
                     }
                     if (IsExitPacket(packet))
                     {
