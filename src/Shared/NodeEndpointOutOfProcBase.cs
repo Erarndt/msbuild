@@ -704,8 +704,7 @@ namespace Microsoft.Build.BackEnd
 
 #if NET451_OR_GREATER || NETCOREAPP
 #pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
-                                await localWritePipe.WriteAsync(packetStream.GetBuffer(), 0, packetStreamLength, CancellationToken.None);
-
+                               await localWritePipe.WriteAsync(packetStream.GetBuffer(), 0, packetStreamLength, CancellationToken.None);
 #pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
 #else
                                 localWritePipe.Write(packetStream.GetBuffer(), 0, packetStreamLength);
