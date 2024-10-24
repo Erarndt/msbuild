@@ -74,9 +74,6 @@ namespace Microsoft.Build.Tasks
         private static string RemovingReadOnlyAttribute;
         private static string SymbolicLinkComment;
 
-        private static SemaphoreSlim copyActionSemaphore;
-        private static readonly object semaphoreLockObject = new();
-
         #region Properties
 
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
@@ -570,24 +567,77 @@ namespace Microsoft.Build.Tasks
 
             // Lockless flags updated from each thread - each needs to be a processor word for atomicity.
             var successFlags = new IntPtr[DestinationFiles.Length];
-            List<System.Threading.Tasks.Task> copyTasks = new();
-
-            lock (semaphoreLockObject)
+            var actionBlockOptions = new ExecutionDataflowBlockOptions
             {
-                copyActionSemaphore ??= new SemaphoreSlim(parallelism, parallelism);
-            }
+                MaxDegreeOfParallelism = parallelism,
+                CancellationToken = _cancellationTokenSource.Token
+            };
+            var partitionCopyActionBlock = new ActionBlock<List<int>>(
+                async (List<int> partition) =>
+                {
+                    // Break from synchronous thread context of caller to get onto thread pool thread.
+                    await System.Threading.Tasks.Task.Yield();
+
+                    for (int partitionIndex = 0; partitionIndex < partition.Count && !_cancellationTokenSource.IsCancellationRequested; partitionIndex++)
+                    {
+                        int fileIndex = partition[partitionIndex];
+                        ITaskItem sourceItem = SourceFiles[fileIndex];
+                        ITaskItem destItem = DestinationFiles[fileIndex];
+                        string sourcePath = sourceItem.ItemSpec;
+
+                        // Check if we just copied from this location to the destination, don't copy again.
+                        MSBuildEventSource.Log.CopyUpToDateStart(destItem.ItemSpec);
+                        bool copyComplete = partitionIndex > 0 &&
+                                            String.Equals(
+                                                sourcePath,
+                                                SourceFiles[partition[partitionIndex - 1]].ItemSpec,
+                                                StringComparison.OrdinalIgnoreCase);
+
+                        if (!copyComplete)
+                        {
+                            if (DoCopyIfNecessary(
+                                new FileState(sourceItem.ItemSpec),
+                                new FileState(destItem.ItemSpec),
+                                copyFile))
+                            {
+                                copyComplete = true;
+                            }
+                            else
+                            {
+                                // Thread race to set outer variable but they race to set the same (false) value.
+                                success = false;
+                            }
+                        }
+                        else
+                        {
+                            MSBuildEventSource.Log.CopyUpToDateStop(destItem.ItemSpec, true);
+                        }
+
+                        if (copyComplete)
+                        {
+                            sourceItem.CopyMetadataTo(destItem);
+                            successFlags[fileIndex] = (IntPtr)1;
+                        }
+                    }
+                },
+                actionBlockOptions);
 
             foreach (List<int> partition in partitionsByDestination.Values)
             {
-                copyActionSemaphore.Wait();
-                copyTasks.Add(System.Threading.Tasks.Task.Run(() => { CopyAction(partition); }));
+                bool partitionAccepted = partitionCopyActionBlock.Post(partition);
                 if (_cancellationTokenSource.IsCancellationRequested)
                 {
                     break;
                 }
+                else if (!partitionAccepted)
+                {
+                    // Retail assert...
+                    ErrorUtilities.ThrowInternalError("Failed posting a file copy to an ActionBlock. Should not happen with block at max int capacity.");
+                }
             }
 
-            System.Threading.Tasks.Task.WhenAll(copyTasks);
+            partitionCopyActionBlock.Complete();
+            partitionCopyActionBlock.Completion.GetAwaiter().GetResult();
 
             // Assemble an in-order list of destination items that succeeded.
             destinationFilesSuccessfullyCopied = new List<ITaskItem>(DestinationFiles.Length);
@@ -600,53 +650,6 @@ namespace Microsoft.Build.Tasks
             }
 
             return success;
-
-            void CopyAction(List<int> partition)
-            {
-                for (int partitionIndex = 0; partitionIndex < partition.Count && !_cancellationTokenSource.IsCancellationRequested; partitionIndex++)
-                {
-                    int fileIndex = partition[partitionIndex];
-                    ITaskItem sourceItem = SourceFiles[fileIndex];
-                    ITaskItem destItem = DestinationFiles[fileIndex];
-                    string sourcePath = sourceItem.ItemSpec;
-
-                    // Check if we just copied from this location to the destination, don't copy again.
-                    MSBuildEventSource.Log.CopyUpToDateStart(destItem.ItemSpec);
-                    bool copyComplete = partitionIndex > 0 &&
-                                        String.Equals(
-                                            sourcePath,
-                                            SourceFiles[partition[partitionIndex - 1]].ItemSpec,
-                                            StringComparison.OrdinalIgnoreCase);
-
-                    if (!copyComplete)
-                    {
-                        if (DoCopyIfNecessary(
-                            new FileState(sourceItem.ItemSpec),
-                            new FileState(destItem.ItemSpec),
-                            copyFile))
-                        {
-                            copyComplete = true;
-                        }
-                        else
-                        {
-                            // Thread race to set outer variable but they race to set the same (false) value.
-                            success = false;
-                        }
-                    }
-                    else
-                    {
-                        MSBuildEventSource.Log.CopyUpToDateStop(destItem.ItemSpec, true);
-                    }
-
-                    if (copyComplete)
-                    {
-                        sourceItem.CopyMetadataTo(destItem);
-                        successFlags[fileIndex] = (IntPtr)1;
-                    }
-                }
-
-                copyActionSemaphore.Release();
-            }
         }
 
         private bool IsSourceSetEmpty()
