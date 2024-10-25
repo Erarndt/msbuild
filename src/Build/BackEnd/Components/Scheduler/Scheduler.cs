@@ -1248,7 +1248,7 @@ namespace Microsoft.Build.BackEnd
         private void AssignUnscheduledRequestsFIFO(List<ScheduleResponse> responses, HashSet<int> idleNodes)
         {
             // Assign requests on a first-come/first-serve basis
-            foreach (int nodeId in idleNodes)
+            foreach (SchedulableRequest unscheduledRequest in _schedulingData.UnscheduledRequestsWhichCanBeScheduled)
             {
                 // Don't overload the system.
                 if (AtSchedulingLimit())
@@ -1257,7 +1257,7 @@ namespace Microsoft.Build.BackEnd
                     return;
                 }
 
-                foreach (SchedulableRequest unscheduledRequest in _schedulingData.UnscheduledRequestsWhichCanBeScheduled)
+                foreach (int nodeId in idleNodes)
                 {
                     if (CanScheduleRequestToNode(unscheduledRequest, nodeId))
                     {
