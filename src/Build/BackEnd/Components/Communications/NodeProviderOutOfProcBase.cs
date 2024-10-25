@@ -17,9 +17,8 @@ using System.Security.Principal;
 
 #if FEATURE_APM
 using Microsoft.Build.Eventing;
-#else
-using System.Threading;
 #endif
+using System.Threading;
 using Microsoft.Build.Internal;
 using Microsoft.Build.Shared;
 using Task = System.Threading.Tasks.Task;
@@ -577,14 +576,17 @@ namespace Microsoft.Build.BackEnd
             /// <summary>
             /// A queue used for enqueuing packets to write to the stream asynchronously.
             /// </summary>
-            private BlockingCollection<INodePacket> _packetWriteQueue = new BlockingCollection<INodePacket>();
+            private ConcurrentQueue<INodePacket> _packetWriteQueue = new ConcurrentQueue<INodePacket>();
 
             /// <summary>
             /// A task representing the last packet write, so we can chain packet writes one after another.
             /// We want to queue up writing packets on a separate thread asynchronously, but serially.
             /// Each task drains the <see cref="_packetWriteQueue"/>
             /// </summary>
-            private Task _packetWriteDrainTask = Task.CompletedTask;
+            private Task _packetWriteDrainTask;
+
+            private AsyncAutoResetEvent _packetWriteDrainEvent = new AsyncAutoResetEvent();
+            private CancellationTokenSource _packetWriteDrainCancellationTokenSource = new CancellationTokenSource();
 
             /// <summary>
             /// Delegate called when the context terminates.
@@ -805,7 +807,8 @@ namespace Microsoft.Build.BackEnd
                 {
                     _exitPacketState = ExitPacketState.ExitPacketQueued;
                 }
-                _packetWriteQueue.Add(packet);
+                _packetWriteQueue.Enqueue(packet);
+                _packetWriteDrainEvent.Set();
                 DrainPacketQueue();
             }
 
@@ -827,16 +830,17 @@ namespace Microsoft.Build.BackEnd
                 {
                     // average latency between the moment this runs and when the delegate starts
                     // running is about 100-200 microseconds (unless there's thread pool saturation)
-                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(static (_, state) =>
+                    _packetWriteDrainTask ??= Task.Run(async () =>
                         {
-                            NodeContext context = (NodeContext)state;
-                            while (context._packetWriteQueue.TryTake(out var packet))
+                            while (!_packetWriteDrainCancellationTokenSource.IsCancellationRequested || !_packetWriteQueue.IsEmpty)
                             {
-                                context.SendDataCore(packet);
+                                await _packetWriteDrainEvent.WaitAsync();
+                                while (_packetWriteQueue.TryDequeue(out var packet))
+                                {
+                                    await SendDataCoreAsync(packet);
+                                }
                             }
-                        },
-                        this,
-                        TaskScheduler.Default);
+                        });
                 }
             }
 
@@ -846,7 +850,7 @@ namespace Microsoft.Build.BackEnd
             /// the _packetWriteDrainTask to serially chain invocations one after another.
             /// </summary>
             /// <param name="packet">The packet to send.</param>
-            private void SendDataCore(INodePacket packet)
+            private async Task SendDataCoreAsync(INodePacket packet)
             {
                 MemoryStream writeStream = _writeBufferMemoryStream;
 
@@ -873,7 +877,9 @@ namespace Microsoft.Build.BackEnd
                     for (int i = 0; i < writeStreamLength; i += MaxPacketWriteSize)
                     {
                         int lengthToWrite = Math.Min(writeStreamLength - i, MaxPacketWriteSize);
-                        _serverToClientStream.Write(writeStreamBuffer, i, lengthToWrite);
+#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                        await _serverToClientStream.WriteAsync(writeStreamBuffer, i, lengthToWrite, System.Threading.CancellationToken.None);
+#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
                     }
                     if (IsExitPacket(packet))
                     {
@@ -929,6 +935,7 @@ namespace Microsoft.Build.BackEnd
                 {
                     // Wait up to 100ms until all remaining packets are sent.
                     // We don't need to wait long, just long enough for the Task to start running on the ThreadPool.
+                    _packetWriteDrainCancellationTokenSource.Cancel();
                     await Task.WhenAny(_packetWriteDrainTask, Task.Delay(100));
                 }
                 if (_exitPacketState == ExitPacketState.ExitPacketSent)

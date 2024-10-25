@@ -752,51 +752,52 @@ namespace Microsoft.Build.BackEnd
 #endregion
 
 #endregion
+    }
 
 #if NET451_OR_GREATER || NETCOREAPP
-        internal sealed class AsyncAutoResetEvent
+    internal sealed class AsyncAutoResetEvent
+    {
+        private readonly System.Collections.Generic.Queue<TaskCompletionSource<bool>> _waits = new();
+        private bool _signaled;
+
+        public Task WaitAsync()
         {
-            private static readonly Task s_completed = Task.FromResult(true);
-            private readonly System.Collections.Generic.Queue<TaskCompletionSource<bool>> _waits = new();
-            private bool _signaled;
-
-            public Task WaitAsync()
+            lock (_waits)
             {
-                lock (_waits)
+                if (_signaled)
                 {
-                    if (_signaled)
-                    {
-                        _signaled = false;
-                        return s_completed;
-                    }
-                    else
-                    {
-                        var tcs = new TaskCompletionSource<bool>();
-                        _waits.Enqueue(tcs);
-                        return tcs.Task;
-                    }
+                    _signaled = false;
+
+                    return Task.CompletedTask;
                 }
-            }
-
-            public void Set()
-            {
-                TaskCompletionSource<bool> toRelease = null;
-
-                lock (_waits)
+                else
                 {
-                    if (_waits.Count > 0)
-                    {
-                        toRelease = _waits.Dequeue();
-                    }
-                    else if (!_signaled)
-                    {
-                        _signaled = true;
-                    }
-                }
+                    var tcs = new TaskCompletionSource<bool>();
+                    _waits.Enqueue(tcs);
 
-                toRelease?.SetResult(true);
+                    return tcs.Task;
+                }
             }
         }
-#endif
+
+        public void Set()
+        {
+            TaskCompletionSource<bool> toRelease = null;
+
+            lock (_waits)
+            {
+                if (_waits.Count > 0)
+                {
+                    toRelease = _waits.Dequeue();
+                }
+                else if (!_signaled)
+                {
+                    _signaled = true;
+                }
+            }
+
+            toRelease?.SetResult(true);
+        }
     }
+#endif
 }
