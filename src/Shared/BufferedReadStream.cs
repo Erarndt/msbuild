@@ -3,6 +3,10 @@
 
 using System;
 using System.IO;
+using System.Threading;
+#if NET451_OR_GREATER
+using System.Threading.Tasks;
+#endif
 
 #nullable disable
 
@@ -119,6 +123,67 @@ namespace Microsoft.Build.BackEnd
                 return alreadyCopied + remainingCopyCount;
             }
         }
+
+#if NET451_OR_GREATER
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (count > BUFFER_SIZE)
+            {
+                // Trying to read more data than the buffer can hold
+                int alreadyCopied = 0;
+                if (_currentlyBufferedByteCount > 0)
+                {
+                    Array.Copy(_buffer, _currentIndexInBuffer, buffer, offset, _currentlyBufferedByteCount);
+                    alreadyCopied = _currentlyBufferedByteCount;
+                    _currentIndexInBuffer = 0;
+                    _currentlyBufferedByteCount = 0;
+                }
+                int innerReadCount = await _innerStream.ReadAsync(buffer, offset + alreadyCopied, count - alreadyCopied, cancellationToken);
+                return innerReadCount + alreadyCopied;
+            }
+            else if (count <= _currentlyBufferedByteCount)
+            {
+                // Enough data buffered to satisfy read request
+                Array.Copy(_buffer, _currentIndexInBuffer, buffer, offset, count);
+                _currentIndexInBuffer += count;
+                _currentlyBufferedByteCount -= count;
+                return count;
+            }
+            else
+            {
+                // Need to read more data
+                int alreadyCopied = 0;
+                if (_currentlyBufferedByteCount > 0)
+                {
+                    Array.Copy(_buffer, _currentIndexInBuffer, buffer, offset, _currentlyBufferedByteCount);
+                    alreadyCopied = _currentlyBufferedByteCount;
+                    _currentIndexInBuffer = 0;
+                    _currentlyBufferedByteCount = 0;
+                }
+
+                int innerReadCount = await _innerStream.ReadAsync(_buffer, 0, BUFFER_SIZE, cancellationToken);
+                _currentIndexInBuffer = 0;
+                _currentlyBufferedByteCount = innerReadCount;
+
+                int remainingCopyCount;
+
+                if (alreadyCopied + innerReadCount >= count)
+                {
+                    remainingCopyCount = count - alreadyCopied;
+                }
+                else
+                {
+                    remainingCopyCount = innerReadCount;
+                }
+
+                Array.Copy(_buffer, 0, buffer, offset + alreadyCopied, remainingCopyCount);
+                _currentIndexInBuffer += remainingCopyCount;
+                _currentlyBufferedByteCount -= remainingCopyCount;
+
+                return alreadyCopied + remainingCopyCount;
+            }
+        }
+#endif
 
         public override long Seek(long offset, SeekOrigin origin)
         {
