@@ -625,13 +625,106 @@ namespace Microsoft.Build.BackEnd
             /// </summary>
             public int NodeId => _nodeId;
 
-            /// <summary>
-            /// Starts a new asynchronous read operation for this node.
-            /// </summary>
-            public void BeginAsyncPacketRead()
+#if NET472_OR_GREATER
+            public async Task PacketReadAsync()
+            {
+                int bytesRead;
+                try
+                {
+                    try
+                    {
+                        bytesRead = await _clientToServerStream.ReadAsync(_headerByte, 0, _headerByte.Length, System.Threading.CancellationToken.None);
+                    }
+
+                    // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                    // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                    catch (ArgumentException)
+                    {
+                        CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                        return;
+                    }
+
+                    if (!ProcessHeaderBytesRead(bytesRead))
+                    {
+                        return;
+                    }
+                }
+                catch (IOException e)
+                {
+                    CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in HeaderReadComplete: {0}", e);
+                    _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                    Close();
+                    return;
+                }
+
+                int packetLength = BinaryPrimitives.ReadInt32LittleEndian(new Span<byte>(_headerByte, 1, 4));
+                MSBuildEventSource.Log.PacketReadSize(packetLength);
+
+                // Ensures the buffer is at least this length.
+                // It avoids reallocations if the buffer is already large enough.
+                _readBufferMemoryStream.SetLength(packetLength);
+                byte[] packetData = _readBufferMemoryStream.GetBuffer();
+
+                NodePacketType packetType = (NodePacketType)_headerByte[0];
+
+                try
+                {
+                    try
+                    {
+                        bytesRead = await _clientToServerStream.ReadAsync(packetData, 0, packetLength, System.Threading.CancellationToken.None);
+                    }
+
+                    // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                    // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                    catch (ArgumentException)
+                    {
+                        CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                        return;
+                    }
+
+                    if (!ProcessBodyBytesRead(bytesRead, packetLength, packetType))
+                    {
+                        return;
+                    }
+                }
+                catch (IOException e)
+                {
+                    CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in BodyReadComplete (Reading): {0}", e);
+                    _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                    Close();
+                    return;
+                }
+
+                // Read and route the packet.
+                if (!ReadAndRoutePacket(packetType, packetData, packetLength))
+                {
+                    return;
+                }
+
+                if (packetType != NodePacketType.NodeShutdown)
+                {
+                    // Read the next packet.
+                    BeginAsyncPacketRead();
+                }
+                else
+                {
+                    Close();
+                }
+            }
+
+#endif
+
+        /// <summary>
+        /// Starts a new asynchronous read operation for this node.
+        /// </summary>
+        public void BeginAsyncPacketRead()
             {
 #if FEATURE_APM
+#if NET451_OR_GREATER
+                _ = PacketReadAsync();
+#else
                 _clientToServerStream.BeginRead(_headerByte, 0, _headerByte.Length, HeaderReadComplete, this);
+#endif
 #else
                 ThreadPool.QueueUserWorkItem(delegate
                 {
@@ -734,13 +827,17 @@ namespace Microsoft.Build.BackEnd
                 {
                     // average latency between the moment this runs and when the delegate starts
                     // running is about 100-200 microseconds (unless there's thread pool saturation)
-                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(_ =>
-                    {
-                        while (_packetWriteQueue.TryTake(out var packet))
+                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(
+                        static async (_, state) =>
                         {
-                            SendDataCore(packet);
-                        }
-                    }, TaskScheduler.Default);
+                            NodeContext context = (NodeContext)state;
+                            while (context._packetWriteQueue.TryTake(out var packet))
+                            {
+                                await context.SendDataCore(packet);
+                            }
+                        },
+                        this,
+                        TaskScheduler.Default).Unwrap();
                 }
             }
 
@@ -750,7 +847,7 @@ namespace Microsoft.Build.BackEnd
             /// the _packetWriteDrainTask to serially chain invocations one after another.
             /// </summary>
             /// <param name="packet">The packet to send.</param>
-            private void SendDataCore(INodePacket packet)
+            private async Task SendDataCore(INodePacket packet)
             {
                 MemoryStream writeStream = _writeBufferMemoryStream;
 
@@ -777,7 +874,10 @@ namespace Microsoft.Build.BackEnd
                     for (int i = 0; i < writeStreamLength; i += MaxPacketWriteSize)
                     {
                         int lengthToWrite = Math.Min(writeStreamLength - i, MaxPacketWriteSize);
-                        _serverToClientStream.Write(writeStreamBuffer, i, lengthToWrite);
+
+#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                        await _serverToClientStream.WriteAsync(writeStreamBuffer, i, lengthToWrite, System.Threading.CancellationToken.None);
+#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
                     }
                     if (IsExitPacket(packet))
                     {
