@@ -577,7 +577,7 @@ namespace Microsoft.Build.BackEnd
             /// <summary>
             /// A queue used for enqueuing packets to write to the stream asynchronously.
             /// </summary>
-            private BlockingCollection<INodePacket> _packetWriteQueue = new BlockingCollection<INodePacket>();
+            private ConcurrentQueue<INodePacket> _packetWriteQueue = new ConcurrentQueue<INodePacket>();
 
             /// <summary>
             /// A task representing the last packet write, so we can chain packet writes one after another.
@@ -712,7 +712,7 @@ namespace Microsoft.Build.BackEnd
                 {
                     _exitPacketState = ExitPacketState.ExitPacketQueued;
                 }
-                _packetWriteQueue.Add(packet);
+                _packetWriteQueue.Enqueue(packet);
                 DrainPacketQueue();
             }
 
@@ -734,13 +734,17 @@ namespace Microsoft.Build.BackEnd
                 {
                     // average latency between the moment this runs and when the delegate starts
                     // running is about 100-200 microseconds (unless there's thread pool saturation)
-                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(_ =>
-                    {
-                        while (_packetWriteQueue.TryTake(out var packet))
+                    _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(
+                        static (_, state) =>
                         {
-                            SendDataCore(packet);
-                        }
-                    }, TaskScheduler.Default);
+                            NodeContext context = (NodeContext)state;
+                            while (context._packetWriteQueue.TryDequeue(out var packet))
+                            {
+                                context.SendDataCore(packet);
+                            }
+                        },
+                        this,
+                        TaskScheduler.Default);
                 }
             }
 
