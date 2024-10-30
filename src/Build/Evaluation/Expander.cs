@@ -2237,7 +2237,7 @@ namespace Microsoft.Build.Evaluation
                 /// <summary>
                 /// A cache of previously created item function delegates.
                 /// </summary>
-                private static ConcurrentDictionary<string, ConcurrentDictionary<string, ItemTransformFunction>> s_transformFunctionDelegateCache = new(StringComparer.OrdinalIgnoreCase);
+                private static ConcurrentDictionary<string, ItemTransformFunction> s_transformFunctionDelegateCache = new ConcurrentDictionary<string, ItemTransformFunction>(StringComparer.OrdinalIgnoreCase);
 
                 /// <summary>
                 /// Delegate that represents the signature of all item transformation functions
@@ -2251,9 +2251,11 @@ namespace Microsoft.Build.Evaluation
                 /// </summary>
                 internal static ItemTransformFunction GetItemTransformFunction(IElementLocation elementLocation, string functionName, Type itemType)
                 {
+                    ItemTransformFunction transformFunction = null;
+                    string qualifiedFunctionName = itemType.FullName + "::" + functionName;
+
                     // We may have seen this delegate before, if so grab the one we already created
-                    ConcurrentDictionary<string, ItemTransformFunction> functionNameDictionary = s_transformFunctionDelegateCache.GetOrAdd(itemType.FullName, static _ => new ConcurrentDictionary<string, ItemTransformFunction>(StringComparer.OrdinalIgnoreCase));
-                    if (!functionNameDictionary.TryGetValue(functionName, out ItemTransformFunction transformFunction))
+                    if (!s_transformFunctionDelegateCache.TryGetValue(qualifiedFunctionName, out transformFunction))
                     {
                         if (FileUtilities.ItemSpecModifiers.IsDerivableItemSpecModifier(functionName))
                         {
@@ -2294,7 +2296,7 @@ namespace Microsoft.Build.Evaluation
                         }
 
                         // record our delegate for future use
-                        transformFunction = functionNameDictionary.GetOrAdd(functionName, transformFunction);
+                        s_transformFunctionDelegateCache[qualifiedFunctionName] = transformFunction;
                     }
 
                     return transformFunction;
