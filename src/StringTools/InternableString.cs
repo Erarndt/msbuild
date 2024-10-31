@@ -185,7 +185,7 @@ namespace Microsoft.NET.StringTools
                 return false;
             }
 
-            if (_inlineSpan.SequenceCompareTo(other.AsSpan(0, _inlineSpan.Length)) != 0)
+            if (!_inlineSpan.SequenceEqual(other.AsSpan(0, _inlineSpan.Length)))
             {
                 return false;
             }
@@ -195,7 +195,7 @@ namespace Microsoft.NET.StringTools
                 int otherStart = _inlineSpan.Length;
                 foreach (ReadOnlyMemory<char> span in _spans)
                 {
-                    if (span.Span.SequenceCompareTo(other.AsSpan(otherStart, span.Length)) != 0)
+                    if (!span.Span.SequenceEqual(other.AsSpan(otherStart, span.Length)))
                     {
                         return false;
                     }
