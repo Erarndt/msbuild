@@ -2311,22 +2311,46 @@ namespace Microsoft.Build.Evaluation
                 internal static IEnumerable<KeyValuePair<string, S>> GetItemPairEnumerable(IEnumerable<S> itemsOfType)
                 {
                     // iterate over the items, and yield out items in the tuple format
-                    foreach (var item in itemsOfType)
+                    if (itemsOfType is LinkedList<S> linkedList)
                     {
-                        if (Traits.Instance.UseLazyWildCardEvaluation)
+                        foreach (var item in linkedList)
                         {
-                            foreach (var resultantItem in
-                                EngineFileUtilities.GetFileListEscaped(
-                                    item.ProjectDirectory,
-                                    item.EvaluatedIncludeEscaped,
-                                    forceEvaluate: true))
+                            if (Traits.Instance.UseLazyWildCardEvaluation)
                             {
-                                yield return new KeyValuePair<string, S>(resultantItem, item);
+                                foreach (var resultantItem in
+                                    EngineFileUtilities.GetFileListEscaped(
+                                        item.ProjectDirectory,
+                                        item.EvaluatedIncludeEscaped,
+                                        forceEvaluate: true))
+                                {
+                                    yield return new KeyValuePair<string, S>(resultantItem, item);
+                                }
+                            }
+                            else
+                            {
+                                yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
                             }
                         }
-                        else
+                    }
+                    else
+                    {
+                        foreach (var item in itemsOfType)
                         {
-                            yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
+                            if (Traits.Instance.UseLazyWildCardEvaluation)
+                            {
+                                foreach (var resultantItem in
+                                    EngineFileUtilities.GetFileListEscaped(
+                                        item.ProjectDirectory,
+                                        item.EvaluatedIncludeEscaped,
+                                        forceEvaluate: true))
+                                {
+                                    yield return new KeyValuePair<string, S>(resultantItem, item);
+                                }
+                            }
+                            else
+                            {
+                                yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
+                            }
                         }
                     }
                 }

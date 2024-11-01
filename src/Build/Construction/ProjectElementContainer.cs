@@ -933,12 +933,17 @@ namespace Microsoft.Build.Construction
             /// <summary>
             /// Get enumerator
             /// </summary>
-            public readonly IEnumerator<ProjectElement> GetEnumerator() => _enumerator;
+            public readonly Enumerator GetEnumerator() => _enumerator;
 
             /// <summary>
             /// Get non generic enumerator
             /// </summary>
             IEnumerator IEnumerable.GetEnumerator() => _enumerator;
+
+            /// <summary>
+            /// Get enumerator
+            /// </summary>
+            IEnumerator<ProjectElement> IEnumerable<ProjectElement>.GetEnumerator() => _enumerator;
 
             /// <summary>
             /// Enumerator over a series of sibling ProjectElement objects
