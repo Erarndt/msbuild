@@ -273,9 +273,6 @@ namespace Microsoft.Build.Evaluation
         /// Enabled by ExpanderOptions.Truncate.
         /// </summary>
         private const int ItemLimitPerExpansion = 3;
-        private static readonly char[] s_singleQuoteChar = { '\'' };
-        private static readonly char[] s_backtickChar = { '`' };
-        private static readonly char[] s_doubleQuoteChar = { '"' };
 
         /// <summary>
         /// Those characters which indicate that an expression may contain expandable
@@ -783,38 +780,43 @@ namespace Microsoft.Build.Evaluation
             // we reached the end of an argument, add the builder's final result
             // to our arguments.
             argumentBuilder.Trim();
-            string argValue = argumentBuilder.ToString();
 
-            // We support passing of null through the argument constant value null
-            if (String.Equals("null", argValue, StringComparison.OrdinalIgnoreCase))
+            if (argumentBuilder.Length > 0)
             {
-                arguments.Add(null);
-            }
-            else
-            {
-                if (argValue.Length > 0)
+                char firstChar = argumentBuilder[0];
+                char lastChar = argumentBuilder[argumentBuilder.Length - 1];
+                if (firstChar == '\'' && lastChar == '\'')
                 {
-                    if (argValue[0] == '\'' && argValue[argValue.Length - 1] == '\'')
+                    argumentBuilder.Trim('\'');
+                    arguments.Add(argumentBuilder.ToString());
+                }
+                else if (firstChar == '`' && lastChar == '`')
+                {
+                    argumentBuilder.Trim('`');
+                    arguments.Add(argumentBuilder.ToString());
+                }
+                else if (firstChar == '"' && lastChar == '"')
+                {
+                    argumentBuilder.Trim('"');
+                    arguments.Add(argumentBuilder.ToString());
+                }
+                else
+                {
+                    string argValue = argumentBuilder.ToString();
+                    // We support passing of null through the argument constant value null
+                    if (String.Equals("null", argValue, StringComparison.OrdinalIgnoreCase))
                     {
-                        arguments.Add(argValue.Trim(s_singleQuoteChar));
-                    }
-                    else if (argValue[0] == '`' && argValue[argValue.Length - 1] == '`')
-                    {
-                        arguments.Add(argValue.Trim(s_backtickChar));
-                    }
-                    else if (argValue[0] == '"' && argValue[argValue.Length - 1] == '"')
-                    {
-                        arguments.Add(argValue.Trim(s_doubleQuoteChar));
+                        arguments.Add(null);
                     }
                     else
                     {
                         arguments.Add(argValue);
                     }
                 }
-                else
-                {
-                    arguments.Add(argValue);
-                }
+            }
+            else
+            {
+                arguments.Add(string.Empty);
             }
         }
 

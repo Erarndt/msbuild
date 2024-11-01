@@ -1383,6 +1383,7 @@ namespace Microsoft.Build.BackEnd.Logging
             void LoggingEventProc()
             {
                 var completeAdding = _loggingEventProcessingCancellation.Token;
+                completeAdding.Register(enqueueEvent => ((AutoResetEvent)enqueueEvent).Set(), _enqueueEvent);
                 WaitHandle[] waitHandlesForNextEvent = { completeAdding.WaitHandle, _enqueueEvent };
 
                 do
@@ -1399,7 +1400,7 @@ namespace Microsoft.Build.BackEnd.Logging
                         // Wait for next event, or finish.
                         if (!completeAdding.IsCancellationRequested && _eventQueue.IsEmpty)
                         {
-                            WaitHandle.WaitAny(waitHandlesForNextEvent);
+                            _enqueueEvent.WaitOne();
                         }
 
                         _emptyQueueEvent.Reset();

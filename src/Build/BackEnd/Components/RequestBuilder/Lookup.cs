@@ -480,7 +480,7 @@ namespace Microsoft.Build.BackEnd
                     ICollection<ProjectItemInstance> adds = scope.Adds[itemType];
                     if (adds.Count != 0)
                     {
-                        allAdds ??= new List<ProjectItemInstance>(adds.Count);
+                        allAdds ??= new List<ProjectItemInstance>();
                         allAdds.AddRange(adds);
                     }
                 }
@@ -491,7 +491,7 @@ namespace Microsoft.Build.BackEnd
                     ICollection<ProjectItemInstance> removes = scope.Removes[itemType];
                     if (removes.Count != 0)
                     {
-                        allRemoves ??= new List<ProjectItemInstance>(removes.Count);
+                        allRemoves ??= new List<ProjectItemInstance>();
                         allRemoves.AddRange(removes);
                     }
                 }

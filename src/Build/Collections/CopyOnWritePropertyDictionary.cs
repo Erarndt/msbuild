@@ -137,12 +137,18 @@ namespace Microsoft.Build.Collections
         /// Gets an enumerator over all the properties in the collection
         /// Enumeration is in undefined order
         /// </summary>
-        public IEnumerator<T> GetEnumerator() => _backing.Values.GetEnumerator();
+        public ImmutableDictionary<string, T>.Enumerator GetEnumerator() => _backing.GetEnumerator();
+
+        /// <summary>
+        /// Gets an enumerator over all the properties in the collection
+        /// Enumeration is in undefined order
+        /// </summary>
+        IEnumerator<T> IEnumerable<T>.GetEnumerator() => new Enumerator(this);
 
         /// <summary>
         /// Get an enumerator over entries
         /// </summary>
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => new Enumerator(this);
 
         #region IEquatable<CopyOnWritePropertyDictionary<T>> Members
 
@@ -365,6 +371,37 @@ namespace Microsoft.Build.Collections
         public ICopyOnWritePropertyDictionary<T> DeepClone()
         {
             return new CopyOnWritePropertyDictionary<T>(this);
+        }
+
+        public struct Enumerator : IEnumerator<T>
+        {
+            private ImmutableDictionary<string, T>.Enumerator _dictionaryEnumerator;
+            public Enumerator(CopyOnWritePropertyDictionary<T> dictionary)
+            {
+                _dictionaryEnumerator = dictionary._backing.GetEnumerator();
+            }
+
+            public T Current { get; private set; }
+
+            readonly object IEnumerator.Current => Current;
+
+            public void Dispose() => _dictionaryEnumerator.Dispose();
+
+            public readonly Enumerator GetEnumerator() => this;
+
+            public bool MoveNext()
+            {
+                if (_dictionaryEnumerator.MoveNext())
+                {
+                    Current = _dictionaryEnumerator.Current.Value;
+
+                    return true;
+                }
+
+                return false;
+            }
+
+            public void Reset() => _dictionaryEnumerator.Reset();
         }
     }
 }

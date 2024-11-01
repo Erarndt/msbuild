@@ -1494,10 +1494,21 @@ namespace Microsoft.Build.Execution
                 var metadata = MetadataCollection;
                 Dictionary<string, string> clonedMetadata = new Dictionary<string, string>(metadata.Count, MSBuildNameIgnoreCaseComparer.Default);
 
-                foreach (ProjectMetadataInstance metadatum in (IEnumerable<ProjectMetadataInstance>)metadata)
+                if (metadata is CopyOnWritePropertyDictionary<ProjectMetadataInstance> metadataDictionary)
                 {
-                    clonedMetadata[metadatum.Name] = metadatum.EvaluatedValue;
+                    foreach (KeyValuePair<string, ProjectMetadataInstance> metadatum in metadataDictionary)
+                    {
+                        clonedMetadata[metadatum.Value.Name] = metadatum.Value.EvaluatedValue;
+                    }
                 }
+                else
+                {
+                    foreach (ProjectMetadataInstance metadatum in (IEnumerable<ProjectMetadataInstance>)metadata)
+                    {
+                        clonedMetadata[metadatum.Name] = metadatum.EvaluatedValue;
+                    }
+                }
+                
 
                 return clonedMetadata;
             }
@@ -1766,12 +1777,20 @@ namespace Microsoft.Build.Execution
                     {
                         int count = temp.Count;
                         translator.Writer.Write(count);
-                        foreach (ProjectMetadataInstance metadatum in (IEnumerable<ProjectMetadataInstance>)temp)
+
+                        if (temp is CopyOnWritePropertyDictionary<ProjectMetadataInstance> copyOnWriteDictionary)
                         {
-                            int key = interner.Intern(metadatum.Name);
-                            int value = interner.Intern(metadatum.EvaluatedValueEscaped);
-                            translator.Writer.Write(key);
-                            translator.Writer.Write(value);
+                            foreach (KeyValuePair<string, ProjectMetadataInstance> metadatum in copyOnWriteDictionary)
+                            {
+                                TranslateMetadata(translator, interner, metadatum.Value);
+                            }
+                        }
+                        else
+                        {
+                            foreach (ProjectMetadataInstance metadatum in (IEnumerable<ProjectMetadataInstance>)temp)
+                            {
+                                TranslateMetadata(translator, interner, metadatum);
+                            }
                         }
                     }
                 }
@@ -1803,6 +1822,14 @@ namespace Microsoft.Build.Execution
                         int value = translator.Reader.ReadInt32();
                         yield return new ProjectMetadataInstance(interner.GetString(key), interner.GetString(value), allowItemSpecModifiers: true);
                     }
+                }
+
+                static void TranslateMetadata(ITranslator translator, LookasideStringInterner interner, ProjectMetadataInstance metadatum)
+                {
+                    int key = interner.Intern(metadatum.Name);
+                    int value = interner.Intern(metadatum.EvaluatedValueEscaped);
+                    translator.Writer.Write(key);
+                    translator.Writer.Write(value);
                 }
             }
 
