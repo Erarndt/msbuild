@@ -1384,7 +1384,6 @@ namespace Microsoft.Build.BackEnd.Logging
             {
                 var completeAdding = _loggingEventProcessingCancellation.Token;
                 completeAdding.Register(enqueueEvent => ((AutoResetEvent)enqueueEvent).Set(), _enqueueEvent);
-                WaitHandle[] waitHandlesForNextEvent = { completeAdding.WaitHandle, _enqueueEvent };
 
                 do
                 {
