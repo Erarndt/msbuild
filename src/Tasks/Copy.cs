@@ -15,6 +15,8 @@ using Microsoft.Build.Shared;
 using Microsoft.Build.Shared.FileSystem;
 using Microsoft.Build.Utilities;
 
+using TPLTask = System.Threading.Tasks.Task;
+
 #nullable disable
 
 namespace Microsoft.Build.Tasks
@@ -559,17 +561,32 @@ namespace Microsoft.Build.Tasks
 
             // Lockless flags updated from each thread - each needs to be a processor word for atomicity.
             var successFlags = new IntPtr[DestinationFiles.Length];
-            var actionBlockOptions = new ExecutionDataflowBlockOptions
-            {
-                MaxDegreeOfParallelism = parallelism,
-                CancellationToken = _cancellationTokenSource.Token
-            };
-            var partitionCopyActionBlock = new ActionBlock<List<int>>(
-                async (List<int> partition) =>
-                {
-                    // Break from synchronous thread context of caller to get onto thread pool thread.
-                    await System.Threading.Tasks.Task.Yield();
 
+            ConcurrentQueue<List<int>> partitionQueue = new ConcurrentQueue<List<int>>(partitionsByDestination.Values);
+            TPLTask[] copyTasks = new TPLTask[parallelism];
+            for (int i = 0; i < parallelism; ++i)
+            {
+                copyTasks[i] = TPLTask.Run(ProcessPartition);
+            }
+
+            TPLTask.WaitAll(copyTasks, _cancellationTokenSource.Token);
+
+            // Assemble an in-order list of destination items that succeeded.
+            destinationFilesSuccessfullyCopied = new List<ITaskItem>(DestinationFiles.Length);
+            for (int i = 0; i < successFlags.Length; i++)
+            {
+                if (successFlags[i] != (IntPtr)0)
+                {
+                    destinationFilesSuccessfullyCopied.Add(DestinationFiles[i]);
+                }
+            }
+
+            return success;
+
+            void ProcessPartition()
+            {
+                while (partitionQueue.TryDequeue(out List<int> partition))
+                {
                     for (int partitionIndex = 0; partitionIndex < partition.Count && !_cancellationTokenSource.IsCancellationRequested; partitionIndex++)
                     {
                         int fileIndex = partition[partitionIndex];
@@ -611,37 +628,8 @@ namespace Microsoft.Build.Tasks
                             successFlags[fileIndex] = (IntPtr)1;
                         }
                     }
-                },
-                actionBlockOptions);
-
-            foreach (List<int> partition in partitionsByDestination.Values)
-            {
-                bool partitionAccepted = partitionCopyActionBlock.Post(partition);
-                if (_cancellationTokenSource.IsCancellationRequested)
-                {
-                    break;
-                }
-                else if (!partitionAccepted)
-                {
-                    // Retail assert...
-                    ErrorUtilities.ThrowInternalError("Failed posting a file copy to an ActionBlock. Should not happen with block at max int capacity.");
                 }
             }
-
-            partitionCopyActionBlock.Complete();
-            partitionCopyActionBlock.Completion.GetAwaiter().GetResult();
-
-            // Assemble an in-order list of destination items that succeeded.
-            destinationFilesSuccessfullyCopied = new List<ITaskItem>(DestinationFiles.Length);
-            for (int i = 0; i < successFlags.Length; i++)
-            {
-                if (successFlags[i] != (IntPtr)0)
-                {
-                    destinationFilesSuccessfullyCopied.Add(DestinationFiles[i]);
-                }
-            }
-
-            return success;
         }
 
         private bool IsSourceSetEmpty()
