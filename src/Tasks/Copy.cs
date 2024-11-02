@@ -290,6 +290,7 @@ namespace Microsoft.Build.Tasks
             }
 
             if (!Traits.Instance.EscapeHatches.CopyWithoutDelete &&
+                (UseHardlinksIfPossible || UseSymboliclinksIfPossible) &&
                 destinationFileState.FileExists &&
                 !destinationFileState.IsReadOnly)
             {
