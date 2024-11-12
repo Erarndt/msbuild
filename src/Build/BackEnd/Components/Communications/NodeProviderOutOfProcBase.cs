@@ -647,87 +647,86 @@ namespace Microsoft.Build.BackEnd
 #if FEATURE_APM
             private async Task BeginAsyncPacketReadInternal()
             {
-                int bytesRead;
-                try
+                while (true)
                 {
+                    int bytesRead;
                     try
                     {
-                        bytesRead = await _clientToServerStream.ReadAsync(_headerByte, 0, _headerByte.Length, CancellationToken.None);
-                    }
+                        try
+                        {
+                            bytesRead = await _clientToServerStream.ReadAsync(_headerByte, 0, _headerByte.Length, CancellationToken.None);
+                        }
 
-                    // Workaround for CLR stress bug; it sporadically calls us twice on the same async
-                    // result, and EndRead will throw on the second one. Pretend the second one never happened.
-                    catch (ArgumentException)
+                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                        catch (ArgumentException)
+                        {
+                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                            return;
+                        }
+
+                        if (!ProcessHeaderBytesRead(bytesRead))
+                        {
+                            return;
+                        }
+                    }
+                    catch (IOException e)
                     {
-                        CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in HeaderReadComplete: {0}", e);
+                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                        Close();
                         return;
                     }
 
-                    if (!ProcessHeaderBytesRead(bytesRead))
-                    {
-                        return;
-                    }
-                }
-                catch (IOException e)
-                {
-                    CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in HeaderReadComplete: {0}", e);
-                    _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
-                    Close();
-                    return;
-                }
+                    int packetLength = BinaryPrimitives.ReadInt32LittleEndian(new Span<byte>(_headerByte, 1, 4));
+                    MSBuildEventSource.Log.PacketReadSize(packetLength);
 
-                int packetLength = BinaryPrimitives.ReadInt32LittleEndian(new Span<byte>(_headerByte, 1, 4));
-                MSBuildEventSource.Log.PacketReadSize(packetLength);
+                    // Ensures the buffer is at least this length.
+                    // It avoids reallocations if the buffer is already large enough.
+                    _readBufferMemoryStream.SetLength(packetLength);
+                    byte[] packetData = _readBufferMemoryStream.GetBuffer();
 
-                // Ensures the buffer is at least this length.
-                // It avoids reallocations if the buffer is already large enough.
-                _readBufferMemoryStream.SetLength(packetLength);
-                byte[] packetData = _readBufferMemoryStream.GetBuffer();
+                    NodePacketType packetType = (NodePacketType)_headerByte[0];
 
-                NodePacketType packetType = (NodePacketType)_headerByte[0];
-
-                try
-                {
                     try
                     {
-                        bytesRead = await _clientToServerStream.ReadAsync(packetData, 0, packetLength, CancellationToken.None);
-                    }
+                        try
+                        {
+                            bytesRead = await _clientToServerStream.ReadAsync(packetData, 0, packetLength, CancellationToken.None);
+                        }
 
-                    // Workaround for CLR stress bug; it sporadically calls us twice on the same async
-                    // result, and EndRead will throw on the second one. Pretend the second one never happened.
-                    catch (ArgumentException)
+                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                        catch (ArgumentException)
+                        {
+                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                            return;
+                        }
+
+                        if (!ProcessBodyBytesRead(bytesRead, packetLength, packetType))
+                        {
+                            return;
+                        }
+                    }
+                    catch (IOException e)
                     {
-                        CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in BodyReadComplete (Reading): {0}", e);
+                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                        Close();
                         return;
                     }
 
-                    if (!ProcessBodyBytesRead(bytesRead, packetLength, packetType))
+                    // Read and route the packet.
+                    if (!ReadAndRoutePacket(packetType, packetData, packetLength))
                     {
                         return;
                     }
-                }
-                catch (IOException e)
-                {
-                    CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in BodyReadComplete (Reading): {0}", e);
-                    _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
-                    Close();
-                    return;
-                }
 
-                // Read and route the packet.
-                if (!ReadAndRoutePacket(packetType, packetData, packetLength))
-                {
-                    return;
-                }
-
-                if (packetType != NodePacketType.NodeShutdown)
-                {
-                    // Read the next packet.
-                    BeginAsyncPacketRead();
-                }
-                else
-                {
-                    Close();
+                    if (packetType == NodePacketType.NodeShutdown)
+                    {
+                        Close();
+                        return;
+                    }
                 }
             }
 #endif
