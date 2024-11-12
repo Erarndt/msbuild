@@ -235,11 +235,13 @@ namespace Microsoft.Build.BackEnd
 #endif
             ConcurrentQueue<NodeContext> nodeContexts = new();
             ConcurrentQueue<Exception> exceptions = new();
+            using Process currentProcess = Process.GetCurrentProcess();
+            int currentProcessId = currentProcess.Id;
             Parallel.For(nextNodeId, nextNodeId + numberOfNodesToCreate, (nodeId) =>
             {
                 try
                 {
-                    if (!TryReuseAnyFromPossibleRunningNodes(nodeId) && !StartNewNode(nodeId))
+                    if (!TryReuseAnyFromPossibleRunningNodes(currentProcessId, nodeId) && !StartNewNode(nodeId))
                     {
                         // We were unable to reuse or launch a node.
                         CommunicationsUtilities.Trace("FAILED TO CONNECT TO A CHILD NODE");
@@ -258,13 +260,12 @@ namespace Microsoft.Build.BackEnd
 
             return nodeContexts.ToList();
 
-            bool TryReuseAnyFromPossibleRunningNodes(int nodeId)
+            bool TryReuseAnyFromPossibleRunningNodes(int currentProcessId, int nodeId)
             {
                 while (possibleRunningNodes != null && possibleRunningNodes.TryDequeue(out var nodeToReuse))
                 {
                     CommunicationsUtilities.Trace("Trying to connect to existing process {2} with id {1} to establish node {0}...", nodeId, nodeToReuse.Id, nodeToReuse.ProcessName);
-                    using Process currentProcess = Process.GetCurrentProcess();
-                    if (nodeToReuse.Id == currentProcess.Id)
+                    if (nodeToReuse.Id == currentProcessId)
                     {
                         continue;
                     }
