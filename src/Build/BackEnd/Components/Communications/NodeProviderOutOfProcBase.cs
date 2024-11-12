@@ -54,6 +54,10 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         private const int TimeoutForWaitForExit = 30000;
 
+#if !FEATURE_PIPEOPTIONS_CURRENTUSERONLY
+        private static readonly WindowsIdentity s_currentWindowsIdentity = WindowsIdentity.GetCurrent();
+#endif
+
         /// <summary>
         /// The build component host.
         /// </summary>
@@ -421,7 +425,7 @@ namespace Microsoft.Build.BackEnd
         //  on non-Windows operating systems
         private static void ValidateRemotePipeSecurityOnWindows(NamedPipeClientStream nodeStream)
         {
-            SecurityIdentifier identifier = WindowsIdentity.GetCurrent().Owner;
+            SecurityIdentifier identifier = s_currentWindowsIdentity.Owner;
 #if FEATURE_PIPE_SECURITY
             PipeSecurity remoteSecurity = nodeStream.GetAccessControl();
 #else
