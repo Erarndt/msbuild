@@ -539,19 +539,19 @@ namespace Microsoft.Build.Internal
             else
 #endif
             {
+                byte[] readBuffer = new byte[bytes.Length];
+                int bytesRead = stream.Read(readBuffer, 0, readBuffer.Length);
+                if (bytesRead != bytes.Length)
+                {
+                    // We've unexpectly reached end of stream.
+                    // We are now in a bad state, disconnect on our end
+                    throw new IOException(String.Format(CultureInfo.InvariantCulture, "Unexpected end of stream while reading for handshake"));
+                }
+
                 // Legacy approach with an early-abort for connection attempts from ancient MSBuild.exes
                 for (int i = 0; i < bytes.Length; i++)
                 {
-                    int read = stream.ReadByte();
-
-                    if (read == -1)
-                    {
-                        // We've unexpectly reached end of stream.
-                        // We are now in a bad state, disconnect on our end
-                        throw new IOException(String.Format(CultureInfo.InvariantCulture, "Unexpected end of stream while reading for handshake"));
-                    }
-
-                    bytes[i] = Convert.ToByte(read);
+                    bytes[i] = Convert.ToByte(readBuffer[i]);
 
                     if (i == 0 && byteToAccept != null && byteToAccept != bytes[0])
                     {
