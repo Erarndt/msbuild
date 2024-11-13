@@ -829,8 +829,9 @@ namespace Microsoft.Build.Internal
 
                     fileName += ".txt";
 
+                    using Process currentProcess = Process.GetCurrentProcess();
                     using (StreamWriter file = FileUtilities.OpenWrite(
-                        String.Format(CultureInfo.CurrentCulture, Path.Combine(s_debugDumpPath, fileName), Process.GetCurrentProcess().Id, nodeId), append: true))
+                        string.Format(CultureInfo.CurrentCulture, Path.Combine(s_debugDumpPath, fileName), currentProcess.Id, nodeId), append: true))
                     {
                         long now = DateTime.UtcNow.Ticks;
                         float millisecondsSinceLastLog = (float)(now - s_lastLoggedTicks) / 10000L;
