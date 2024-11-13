@@ -592,7 +592,7 @@ namespace Microsoft.Build.BackEnd
                                 break;
                             }
 
-                            NodePacketType packetType = (NodePacketType)Enum.ToObject(typeof(NodePacketType), headerByte[0]);
+                            NodePacketType packetType = (NodePacketType)headerByte[0];
 
                             try
                             {
