@@ -539,8 +539,7 @@ namespace Microsoft.Build.Internal
             else
 #endif
             {
-                byte[] readBuffer = new byte[bytes.Length];
-                int bytesRead = stream.Read(readBuffer, 0, readBuffer.Length);
+                int bytesRead = stream.Read(bytes, 0, bytes.Length);
                 if (bytesRead != bytes.Length)
                 {
                     // We've unexpectly reached end of stream.
@@ -549,16 +548,11 @@ namespace Microsoft.Build.Internal
                 }
 
                 // Legacy approach with an early-abort for connection attempts from ancient MSBuild.exes
-                for (int i = 0; i < bytes.Length; i++)
+                if (byteToAccept != null && byteToAccept != bytes[0])
                 {
-                    bytes[i] = Convert.ToByte(readBuffer[i]);
-
-                    if (i == 0 && byteToAccept != null && byteToAccept != bytes[0])
-                    {
-                        stream.WriteIntForHandshake(0x0F0F0F0F);
-                        stream.WriteIntForHandshake(0x0F0F0F0F);
-                        throw new InvalidOperationException(String.Format(CultureInfo.InvariantCulture, "Client: rejected old host. Received byte {0} instead of {1}.", bytes[0], byteToAccept));
-                    }
+                    stream.WriteIntForHandshake(0x0F0F0F0F);
+                    stream.WriteIntForHandshake(0x0F0F0F0F);
+                    throw new InvalidOperationException(String.Format(CultureInfo.InvariantCulture, "Client: rejected old host. Received byte {0} instead of {1}.", bytes[0], byteToAccept));
                 }
             }
 
