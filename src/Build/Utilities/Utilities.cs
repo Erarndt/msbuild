@@ -703,36 +703,49 @@ namespace Microsoft.Build.Internal
             }
             else
             {
-                foreach (var item in items)
+                if (items is List<DictionaryEntry> dictionaryEntryList)
                 {
-                    string itemType = default;
-                    object itemValue = null;
-
-                    if (item is IItem iitem)
+                    foreach (DictionaryEntry dictionaryEntry in dictionaryEntryList)
                     {
-                        itemType = iitem.Key;
-                        itemValue = iitem;
-                    }
-                    else if (item is DictionaryEntry dictionaryEntry)
-                    {
-                        itemType = dictionaryEntry.Key as string;
-                        itemValue = dictionaryEntry.Value;
-                    }
-                    else
-                    {
-                        if (item == null)
+                        if (dictionaryEntry.Key is string key && !String.IsNullOrEmpty(key))
                         {
-                            Debug.Fail($"In {nameof(EnumerateItems)}(): Unexpected: {nameof(item)} is null");
+                            callback(new DictionaryEntry(key, dictionaryEntry.Value));
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var item in items)
+                    {
+                        string itemType = default;
+                        object itemValue = null;
+
+                        if (item is IItem iitem)
+                        {
+                            itemType = iitem.Key;
+                            itemValue = iitem;
+                        }
+                        else if (item is DictionaryEntry dictionaryEntry)
+                        {
+                            itemType = dictionaryEntry.Key as string;
+                            itemValue = dictionaryEntry.Value;
                         }
                         else
                         {
-                            Debug.Fail($"In {nameof(EnumerateItems)}(): Unexpected {nameof(item)} {item} of type {item?.GetType().ToString()}");
+                            if (item == null)
+                            {
+                                Debug.Fail($"In {nameof(EnumerateItems)}(): Unexpected: {nameof(item)} is null");
+                            }
+                            else
+                            {
+                                Debug.Fail($"In {nameof(EnumerateItems)}(): Unexpected {nameof(item)} {item} of type {item?.GetType().ToString()}");
+                            }
                         }
-                    }
 
-                    if (!String.IsNullOrEmpty(itemType))
-                    {
-                        callback(new DictionaryEntry(itemType, itemValue));
+                        if (!String.IsNullOrEmpty(itemType))
+                        {
+                            callback(new DictionaryEntry(itemType, itemValue));
+                        }
                     }
                 }
             }
