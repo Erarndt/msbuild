@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Xml.Linq;
 using Microsoft.Build.BackEnd.Logging;
 using Microsoft.Build.Collections;
 using Microsoft.Build.Evaluation;
@@ -479,10 +480,12 @@ namespace Microsoft.Build.BackEnd
             {
                 foreach (var item in items)
                 {
-                    var metadataToRemove = item.MetadataNames.Where(name => !keepMetadata.Contains(name));
-                    foreach (var metadataName in metadataToRemove)
+                    foreach (var metadataName in item.MetadataNames)
                     {
-                        item.RemoveMetadata(metadataName);
+                        if (!keepMetadata.Contains(metadataName))
+                        {
+                            item.RemoveMetadata(metadataName);
+                        }
                     }
                 }
             }
@@ -490,10 +493,12 @@ namespace Microsoft.Build.BackEnd
             {
                 foreach (var item in items)
                 {
-                    var metadataToRemove = item.MetadataNames.Where(name => removeMetadata.Contains(name));
-                    foreach (var metadataName in metadataToRemove)
+                    foreach (var metadataName in item.MetadataNames)
                     {
-                        item.RemoveMetadata(metadataName);
+                        if (removeMetadata.Contains(metadataName))
+                        {
+                            item.RemoveMetadata(metadataName);
+                        }
                     }
                 }
             }
@@ -588,7 +593,7 @@ namespace Microsoft.Build.BackEnd
             // filename in the remove list.
             List<ProjectItemInstance> itemsRemoved = new List<ProjectItemInstance>();
 
-            foreach (ProjectItemInstance item in items)
+            foreach (ProjectItemInstance item in items.GetStructEnumerable())
             {
                 // Even if the case for the excluded files is different, they
                 // will still get excluded, as expected.  However, if the excluded path

@@ -603,7 +603,7 @@ namespace Microsoft.Build.Execution
             IEnumerable<ProjectMetadataInstance> projectMetadataInstances = metadataList.Select(metadatum => new ProjectMetadataInstance(metadatum.Key, metadatum.Value));
             metadata.ImportProperties(projectMetadataInstances);
 
-            foreach (ProjectItemInstance item in items)
+            foreach (ProjectItemInstance item in items.GetStructEnumerable())
             {
                 item._taskItem.SetMetadata(metadata); // Potential copy on write
             }

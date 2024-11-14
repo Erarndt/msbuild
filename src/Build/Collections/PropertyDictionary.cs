@@ -546,13 +546,27 @@ namespace Microsoft.Build.Collections
             {
                 ICollection<T> propertiesCollection = (ICollection<T>)_properties;
                 List<TResult> result = new(propertiesCollection.Count);
-                foreach (T property in propertiesCollection)
+                if (_properties is RetrievableValuedEntryHashSet<T> hashSet)
                 {
-                    if (filter(property))
+                    foreach (T property in hashSet)
                     {
-                        result.Add(selector(property));
+                        if (filter(property))
+                        {
+                            result.Add(selector(property));
+                        }
                     }
                 }
+                else
+                {
+                    foreach (T property in propertiesCollection)
+                    {
+                        if (filter(property))
+                        {
+                            result.Add(selector(property));
+                        }
+                    }
+                }
+                
 
                 return result;
             }

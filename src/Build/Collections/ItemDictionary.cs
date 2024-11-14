@@ -340,7 +340,7 @@ namespace Microsoft.Build.Collections
         /// <param name="other">An enumerator over the items to remove.</param>
         public void RemoveItems(IEnumerable<T> other)
         {
-            foreach (T item in other)
+            foreach (T item in other.GetStructEnumerable())
             {
                 Remove(item);
             }

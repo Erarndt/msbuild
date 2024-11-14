@@ -696,7 +696,7 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         internal void RemoveItems(IEnumerable<ProjectItemInstance> items)
         {
-            foreach (ProjectItemInstance item in items)
+            foreach (ProjectItemInstance item in items.GetStructEnumerable())
             {
                 RemoveItem(item);
             }
