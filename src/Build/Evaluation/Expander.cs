@@ -2046,31 +2046,15 @@ namespace Microsoft.Build.Evaluation
 
                 if (!isTransformExpression)
                 {
-                    if (itemsOfType is ImmutableList<S> immutableList)
+                    // No transform: expression is like @(Compile), so include the item spec without a transform base item
+                    foreach (S item in itemsOfType.GetStructEnumerable())
                     {
-                        // No transform: expression is like @(Compile), so include the item spec without a transform base item
-                        foreach (S item in immutableList)
+                        if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
                         {
-                            if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
-                            {
-                                return true;
-                            }
-
-                            itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
+                            return true;
                         }
-                    }
-                    else
-                    {
-                        // No transform: expression is like @(Compile), so include the item spec without a transform base item
-                        foreach (S item in itemsOfType)
-                        {
-                            if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
-                            {
-                                return true;
-                            }
 
-                            itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
-                        }
+                        itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
                     }
                 }
                 else
@@ -2338,46 +2322,22 @@ namespace Microsoft.Build.Evaluation
                 internal static IEnumerable<KeyValuePair<string, S>> GetItemPairEnumerable(IEnumerable<S> itemsOfType)
                 {
                     // iterate over the items, and yield out items in the tuple format
-                    if (itemsOfType is ImmutableList<S> immutableList)
+                    foreach (var item in itemsOfType.GetStructEnumerable())
                     {
-                        foreach (var item in immutableList)
+                        if (Traits.Instance.UseLazyWildCardEvaluation)
                         {
-                            if (Traits.Instance.UseLazyWildCardEvaluation)
+                            foreach (var resultantItem in
+                                EngineFileUtilities.GetFileListEscaped(
+                                    item.ProjectDirectory,
+                                    item.EvaluatedIncludeEscaped,
+                                    forceEvaluate: true))
                             {
-                                foreach (var resultantItem in
-                                    EngineFileUtilities.GetFileListEscaped(
-                                        item.ProjectDirectory,
-                                        item.EvaluatedIncludeEscaped,
-                                        forceEvaluate: true))
-                                {
-                                    yield return new KeyValuePair<string, S>(resultantItem, item);
-                                }
-                            }
-                            else
-                            {
-                                yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
+                                yield return new KeyValuePair<string, S>(resultantItem, item);
                             }
                         }
-                    }
-                    else
-                    {
-                        foreach (var item in itemsOfType)
+                        else
                         {
-                            if (Traits.Instance.UseLazyWildCardEvaluation)
-                            {
-                                foreach (var resultantItem in
-                                    EngineFileUtilities.GetFileListEscaped(
-                                        item.ProjectDirectory,
-                                        item.EvaluatedIncludeEscaped,
-                                        forceEvaluate: true))
-                                {
-                                    yield return new KeyValuePair<string, S>(resultantItem, item);
-                                }
-                            }
-                            else
-                            {
-                                yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
-                            }
+                            yield return new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item);
                         }
                     }
                 }

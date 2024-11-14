@@ -69,19 +69,9 @@ namespace Microsoft.Build.Evaluation
         {
             ItemsAndMetadataPair pair = new ItemsAndMetadataPair(null, null);
 
-            if (expressions is List<string> list)
+            foreach (string expression in expressions.GetStructEnumerable())
             {
-                foreach (string expression in list)
-                {
-                    GetReferencedItemNamesAndMetadata(expression, 0, expression.Length, ref pair, ShredderOptions.All);
-                }
-            }
-            else
-            {
-                foreach (string expression in expressions)
-                {
-                    GetReferencedItemNamesAndMetadata(expression, 0, expression.Length, ref pair, ShredderOptions.All);
-                }
+                GetReferencedItemNamesAndMetadata(expression, 0, expression.Length, ref pair, ShredderOptions.All);
             }
 
             return pair;

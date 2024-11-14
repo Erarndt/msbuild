@@ -322,29 +322,14 @@ namespace Microsoft.Build.Collections
                     _itemLists[itemType] = list;
                 }
 
-                if (items is List<T> itemsList)
+                foreach (T item in items.GetStructEnumerable())
                 {
-                    foreach (T item in itemsList)
-                    {
 #if DEBUG
-                        // Debug only: hot code path
-                        ErrorUtilities.VerifyThrow(String.Equals(itemType, item.Key, StringComparison.OrdinalIgnoreCase), "Item type mismatch");
+                    // Debug only: hot code path
+                    ErrorUtilities.VerifyThrow(String.Equals(itemType, item.Key, StringComparison.OrdinalIgnoreCase), "Item type mismatch");
 #endif
-                        LinkedListNode<T> node = list.AddLast(item);
-                        _nodes.Add(item, node);
-                    }
-                }
-                else
-                {
-                    foreach (T item in items)
-                    {
-#if DEBUG
-                        // Debug only: hot code path
-                        ErrorUtilities.VerifyThrow(String.Equals(itemType, item.Key, StringComparison.OrdinalIgnoreCase), "Item type mismatch");
-#endif
-                        LinkedListNode<T> node = list.AddLast(item);
-                        _nodes.Add(item, node);
-                    }
+                    LinkedListNode<T> node = list.AddLast(item);
+                    _nodes.Add(item, node);
                 }
             }
         }
