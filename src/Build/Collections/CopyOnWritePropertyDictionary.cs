@@ -357,9 +357,19 @@ namespace Microsoft.Build.Collections
 
             static IEnumerable<KeyValuePair<string, T>> Items(IEnumerable<T> other)
             {
-                foreach (T property in other)
+                if (other is CopyOnWritePropertyDictionary<T> copyOnWriteDictionary)
                 {
-                    yield return new(property.Key, property);
+                    foreach (KeyValuePair<string, T> kvp in copyOnWriteDictionary)
+                    {
+                        yield return new(kvp.Value.Key, kvp.Value);
+                    }
+                }
+                else
+                {
+                    foreach (T property in other)
+                    {
+                        yield return new(property.Key, property);
+                    }
                 }
             }
         }
