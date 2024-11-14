@@ -72,7 +72,7 @@ namespace Microsoft.Build.Collections
 #endif
                 list = new List<TResult>(count);
             }
-            else if (_backingEnumerable is IReadOnlyCollection<TResult> readOnlyCollection)
+            else if (_backingEnumerable is IReadOnlyCollection<TSource> readOnlyCollection)
             {
                 list = new List<TResult>(readOnlyCollection.Count);
             }
