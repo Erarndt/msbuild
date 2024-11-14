@@ -29,7 +29,7 @@ namespace Microsoft.Build.Collections
     /// </remarks>
     /// <typeparam name="T">Item class type to store</typeparam>
     [DebuggerDisplay("#Item types={ItemTypes.Count} #Items={Count}")]
-    internal sealed class ItemDictionary<T> : IItemDictionary<T>
+    internal sealed class ItemDictionary<T> : IItemDictionary<T>, IReadOnlyCollection<T>
         where T : class, IKeyed, IItem
     {
         /// <summary>
