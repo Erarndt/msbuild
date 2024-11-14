@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
@@ -2045,15 +2046,31 @@ namespace Microsoft.Build.Evaluation
 
                 if (!isTransformExpression)
                 {
-                    // No transform: expression is like @(Compile), so include the item spec without a transform base item
-                    foreach (S item in itemsOfType)
+                    if (itemsOfType is ImmutableList<S> immutableList)
                     {
-                        if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
+                        // No transform: expression is like @(Compile), so include the item spec without a transform base item
+                        foreach (S item in immutableList)
                         {
-                            return true;
-                        }
+                            if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
+                            {
+                                return true;
+                            }
 
-                        itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
+                            itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
+                        }
+                    }
+                    else
+                    {
+                        // No transform: expression is like @(Compile), so include the item spec without a transform base item
+                        foreach (S item in itemsOfType)
+                        {
+                            if ((item.EvaluatedIncludeEscaped.Length > 0) && (options & ExpanderOptions.BreakOnNotEmpty) != 0)
+                            {
+                                return true;
+                            }
+
+                            itemsFromCapture.Add(new KeyValuePair<string, S>(item.EvaluatedIncludeEscaped, item));
+                        }
                     }
                 }
                 else
@@ -2321,9 +2338,9 @@ namespace Microsoft.Build.Evaluation
                 internal static IEnumerable<KeyValuePair<string, S>> GetItemPairEnumerable(IEnumerable<S> itemsOfType)
                 {
                     // iterate over the items, and yield out items in the tuple format
-                    if (itemsOfType is LinkedList<S> linkedList)
+                    if (itemsOfType is ImmutableList<S> immutableList)
                     {
-                        foreach (var item in linkedList)
+                        foreach (var item in immutableList)
                         {
                             if (Traits.Instance.UseLazyWildCardEvaluation)
                             {
