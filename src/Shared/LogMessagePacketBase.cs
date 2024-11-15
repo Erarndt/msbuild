@@ -1167,9 +1167,19 @@ namespace Microsoft.Build.Shared
                 // it is expensive to access a ThreadStatic field every time
                 var list = reusablePropertyList;
 
-                foreach (var item in metadata)
+                if (metadata is CopyOnWriteDictionary<string> dictionary)
                 {
-                    list.Add(item);
+                    foreach (var entry in dictionary)
+                    {
+                        list.Add(entry);
+                    }
+                }
+                else
+                {
+                    foreach (var item in metadata)
+                    {
+                        list.Add(item);
+                    }
                 }
 
                 BinaryWriterExtensions.Write7BitEncodedInt(writer, list.Count);
