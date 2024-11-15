@@ -108,7 +108,8 @@ namespace Microsoft.Build.Internal
             fileVersionMinor = fileVersion.Minor;
             fileVersionBuild = fileVersion.Build;
             fileVersionPrivate = fileVersion.Revision;
-            sessionId = Process.GetCurrentProcess().SessionId;
+            using Process currentProcess = Process.GetCurrentProcess();
+            sessionId = currentProcess.SessionId;
         }
 
         // This is used as a key, so it does not need to be human readable.

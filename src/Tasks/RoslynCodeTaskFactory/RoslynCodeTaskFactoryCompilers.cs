@@ -52,7 +52,8 @@ namespace Microsoft.Build.Tasks
             if (string.IsNullOrEmpty(_dotnetCliPath))
             {
                 // Fallback to get dotnet path from current process which might be dotnet executable.
-                _dotnetCliPath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                using System.Diagnostics.Process currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                _dotnetCliPath = currentProcess.MainModule.FileName;
             }
 
             // If dotnet path is not found, rely on dotnet via the system's PATH

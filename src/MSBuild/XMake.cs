@@ -420,7 +420,7 @@ namespace Microsoft.Build.CommandLine
         /// </comments>
         private static void DumpCounters(bool initializeOnly)
         {
-            Process currentProcess = Process.GetCurrentProcess();
+            using Process currentProcess = Process.GetCurrentProcess();
 
             if (!initializeOnly)
             {
@@ -616,9 +616,12 @@ namespace Microsoft.Build.CommandLine
 #endif
                 case "2":
                     // Sometimes easier to attach rather than deal with JIT prompt
-                    Process currentProcess = Process.GetCurrentProcess();
-                    Console.WriteLine($"Waiting for debugger to attach ({currentProcess.MainModule.FileName} PID {currentProcess.Id}).  Press enter to continue...");
-                    Console.ReadLine();
+                    using (Process currentProcess = Process.GetCurrentProcess())
+                    {
+                        Console.WriteLine($"Waiting for debugger to attach ({currentProcess.MainModule.FileName} PID {currentProcess.Id}).  Press enter to continue...");
+                        Console.ReadLine();
+                    }
+
                     break;
             }
         }
@@ -1720,12 +1723,13 @@ namespace Microsoft.Build.CommandLine
 
         private static List<BuildManager.DeferredBuildMessage> GetMessagesToLogInBuildLoggers(string commandLineString)
         {
+            using Process currentProcess = Process.GetCurrentProcess();
             List<BuildManager.DeferredBuildMessage> messages = new(s_globalMessagesToLogInBuildLoggers)
             {
                 new BuildManager.DeferredBuildMessage(
                     ResourceUtilities.FormatResourceStringIgnoreCodeAndKeyword(
                         "Process",
-                        Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty),
+                        currentProcess.MainModule?.FileName ?? string.Empty),
                     MessageImportance.Low),
                 new BuildManager.DeferredBuildMessage(
                     ResourceUtilities.FormatResourceStringIgnoreCodeAndKeyword(
@@ -2516,7 +2520,7 @@ namespace Microsoft.Build.CommandLine
 
                 if (!Debugger.IsAttached)
                 {
-                    Process currentProcess = Process.GetCurrentProcess();
+                    using Process currentProcess = Process.GetCurrentProcess();
                     Console.WriteLine($"Waiting for debugger to attach... ({currentProcess.MainModule.FileName} PID {currentProcess.Id})");
                     while (!Debugger.IsAttached)
                     {
@@ -2544,9 +2548,13 @@ namespace Microsoft.Build.CommandLine
             }
             try
             {
-                if (lowPriority && Process.GetCurrentProcess().PriorityClass != ProcessPriorityClass.Idle)
+                if (lowPriority)
                 {
-                    Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal;
+                    using Process currentProcess = Process.GetCurrentProcess();
+                    if (currentProcess.PriorityClass != ProcessPriorityClass.Idle)
+                    {
+                        currentProcess.PriorityClass = ProcessPriorityClass.BelowNormal;
+                    }
                 }
             }
             // We avoid increasing priority because that causes failures on mac/linux, but there is no good way to

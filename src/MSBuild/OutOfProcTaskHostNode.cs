@@ -810,8 +810,9 @@ namespace Microsoft.Build.CommandLine
             // Wait for the RunTask task runner thread before shutting down so that we can cleanly dispose all WaitHandles.
             _taskRunnerThread?.Join();
 
+            using Process currentProcess = Process.GetCurrentProcess();
             using StreamWriter debugWriter = _debugCommunications
-                ? File.CreateText(string.Format(CultureInfo.CurrentCulture, Path.Combine(FileUtilities.TempFileDirectory, @"MSBuild_NodeShutdown_{0}.txt"), Process.GetCurrentProcess().Id))
+                ? File.CreateText(string.Format(CultureInfo.CurrentCulture, Path.Combine(FileUtilities.TempFileDirectory, @"MSBuild_NodeShutdown_{0}.txt"), currentProcess.Id))
                 : null;
             debugWriter?.WriteLine("Node shutting down with reason {0}.", _shutdownReason);
 

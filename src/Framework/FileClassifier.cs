@@ -141,7 +141,8 @@ namespace Microsoft.Build.Framework
 
                 // Seems like MSBuild did not run from VS but from CLI.
                 // Identify current process and run it
-                string processName = Process.GetCurrentProcess().MainModule.FileName;
+                using Process currentProcess = Process.GetCurrentProcess();
+                string processName = currentProcess.MainModule.FileName;
                 string processFileName = Path.GetFileNameWithoutExtension(processName);
 
                 if (string.IsNullOrEmpty(processFileName))
