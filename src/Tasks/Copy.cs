@@ -45,7 +45,32 @@ namespace Microsoft.Build.Tasks
         // threads at the advantage of performing file copies more quickly in the kernel - we must avoid
         // taking up the whole threadpool esp. when hosted in Visual Studio. IOW we use a specific number
         // instead of int.MaxValue.
-        private static readonly int DefaultCopyParallelism = NativeMethodsShared.GetLogicalCoreCount() > 4 ? 6 : 4;
+        private static readonly int DefaultCopyParallelism = Environment.ProcessorCount; // NativeMethodsShared.GetLogicalCoreCount() > 4 ? 6 : 4;
+        private static readonly Thread[] copyThreads;
+        private static readonly AutoResetEvent[] copyThreadSignals;
+        private readonly AutoResetEvent _signalCopyTasksCompleted;
+
+        private static ConcurrentQueue<Action> _copyActionQueue;
+
+#pragma warning disable CA1810 // Initialize reference type static fields inline
+        static Copy()
+#pragma warning restore CA1810 // Initialize reference type static fields inline
+        {
+            _copyActionQueue = new ConcurrentQueue<Action>();
+
+            copyThreadSignals = new AutoResetEvent[DefaultCopyParallelism];
+            copyThreads = new Thread[DefaultCopyParallelism];
+            for (int i = 0; i < copyThreads.Length; ++i)
+            {
+                AutoResetEvent autoResetEvent = new AutoResetEvent(false);
+                copyThreadSignals[i] = autoResetEvent;
+                Thread newThread = new Thread(ParallelCopyTask);
+                newThread.IsBackground = true;
+                newThread.Name = "Parallel Copy Thread";
+                newThread.Start(autoResetEvent);
+                copyThreads[i] = newThread;
+            }
+        }
 
         /// <summary>
         /// Constructor.
@@ -65,6 +90,8 @@ namespace Microsoft.Build.Tasks
                 RemovingReadOnlyAttribute = Log.GetResourceMessage("Copy.RemovingReadOnlyAttribute");
                 SymbolicLinkComment = Log.GetResourceMessage("Copy.SymbolicLinkComment");
             }
+
+            _signalCopyTasksCompleted = new AutoResetEvent(false);
         }
 
         private static string CreatesDirectory;
@@ -510,6 +537,22 @@ namespace Microsoft.Build.Tasks
             return success;
         }
 
+        private static void ParallelCopyTask(object state)
+        {
+            AutoResetEvent autoResetEvent = (AutoResetEvent)state;
+            while (true)
+            {
+                if (_copyActionQueue.TryDequeue(out Action copyAction))
+                {
+                    copyAction();
+                }
+                else
+                {
+                    autoResetEvent.WaitOne();
+                }
+            }
+        }
+
         /// <summary>
         /// Parallelize I/O with the same semantics as the single-threaded copy method above.
         /// ResolveAssemblyReferences tends to generate longer and longer lists of files to send
@@ -564,13 +607,15 @@ namespace Microsoft.Build.Tasks
             var successFlags = new IntPtr[DestinationFiles.Length];
 
             ConcurrentQueue<List<int>> partitionQueue = new ConcurrentQueue<List<int>>(partitionsByDestination.Values);
-            TPLTask[] copyTasks = new TPLTask[parallelism];
-            for (int i = 0; i < parallelism; ++i)
+
+            int activeCopyThreads = DefaultCopyParallelism;
+            for (int i = 0; i < DefaultCopyParallelism; ++i)
             {
-                copyTasks[i] = TPLTask.Run(ProcessPartition);
+                _copyActionQueue.Enqueue(ProcessPartition);
+                copyThreadSignals[i].Set();
             }
 
-            TPLTask.WaitAll(copyTasks, _cancellationTokenSource.Token);
+            _signalCopyTasksCompleted.WaitOne();
 
             // Assemble an in-order list of destination items that succeeded.
             destinationFilesSuccessfullyCopied = new List<ITaskItem>(DestinationFiles.Length);
@@ -586,48 +631,59 @@ namespace Microsoft.Build.Tasks
 
             void ProcessPartition()
             {
-                while (partitionQueue.TryDequeue(out List<int> partition))
+                try
                 {
-                    for (int partitionIndex = 0; partitionIndex < partition.Count && !_cancellationTokenSource.IsCancellationRequested; partitionIndex++)
+                    while (partitionQueue.TryDequeue(out List<int> partition))
                     {
-                        int fileIndex = partition[partitionIndex];
-                        ITaskItem sourceItem = SourceFiles[fileIndex];
-                        ITaskItem destItem = DestinationFiles[fileIndex];
-                        string sourcePath = sourceItem.ItemSpec;
-
-                        // Check if we just copied from this location to the destination, don't copy again.
-                        MSBuildEventSource.Log.CopyUpToDateStart(destItem.ItemSpec);
-                        bool copyComplete = partitionIndex > 0 &&
-                                            String.Equals(
-                                                sourcePath,
-                                                SourceFiles[partition[partitionIndex - 1]].ItemSpec,
-                                                StringComparison.OrdinalIgnoreCase);
-
-                        if (!copyComplete)
+                        for (int partitionIndex = 0; partitionIndex < partition.Count && !_cancellationTokenSource.IsCancellationRequested; partitionIndex++)
                         {
-                            if (DoCopyIfNecessary(
-                                new FileState(sourceItem.ItemSpec),
-                                new FileState(destItem.ItemSpec),
-                                copyFile))
+                            int fileIndex = partition[partitionIndex];
+                            ITaskItem sourceItem = SourceFiles[fileIndex];
+                            ITaskItem destItem = DestinationFiles[fileIndex];
+                            string sourcePath = sourceItem.ItemSpec;
+
+                            // Check if we just copied from this location to the destination, don't copy again.
+                            MSBuildEventSource.Log.CopyUpToDateStart(destItem.ItemSpec);
+                            bool copyComplete = partitionIndex > 0 &&
+                                                String.Equals(
+                                                    sourcePath,
+                                                    SourceFiles[partition[partitionIndex - 1]].ItemSpec,
+                                                    StringComparison.OrdinalIgnoreCase);
+
+                            if (!copyComplete)
                             {
-                                copyComplete = true;
+                                if (DoCopyIfNecessary(
+                                    new FileState(sourceItem.ItemSpec),
+                                    new FileState(destItem.ItemSpec),
+                                    copyFile))
+                                {
+                                    copyComplete = true;
+                                }
+                                else
+                                {
+                                    // Thread race to set outer variable but they race to set the same (false) value.
+                                    success = false;
+                                }
                             }
                             else
                             {
-                                // Thread race to set outer variable but they race to set the same (false) value.
-                                success = false;
+                                MSBuildEventSource.Log.CopyUpToDateStop(destItem.ItemSpec, true);
+                            }
+
+                            if (copyComplete)
+                            {
+                                sourceItem.CopyMetadataTo(destItem);
+                                successFlags[fileIndex] = (IntPtr)1;
                             }
                         }
-                        else
-                        {
-                            MSBuildEventSource.Log.CopyUpToDateStop(destItem.ItemSpec, true);
-                        }
-
-                        if (copyComplete)
-                        {
-                            sourceItem.CopyMetadataTo(destItem);
-                            successFlags[fileIndex] = (IntPtr)1;
-                        }
+                    }
+                }
+                finally
+                {
+                    int count = System.Threading.Interlocked.Decrement(ref activeCopyThreads);
+                    if (count == 0)
+                    {
+                        _signalCopyTasksCompleted.Set();
                     }
                 }
             }
