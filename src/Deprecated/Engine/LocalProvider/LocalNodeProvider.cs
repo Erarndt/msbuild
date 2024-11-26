@@ -452,9 +452,10 @@ namespace Microsoft.Build.BuildEngine
         {
             try
             {
-                if (!Process.GetProcessById(processId).HasExited)
+                using Process process = Process.GetProcessById(processId);
+                if (!process.HasExited)
                 {
-                    Process.GetProcessById(processId).Kill();
+                    process.Kill();
                 }
             }
             catch (ArgumentException)
@@ -490,9 +491,14 @@ namespace Microsoft.Build.BuildEngine
 
                 bool isInvalidProcessId = nodeData[nodeId].ProcessId == LocalNodeInfo.invalidProcessId;
 
-                if (!isInvalidProcessId && !Process.GetProcessById(nodeData[nodeId].ProcessId).HasExited)
+                if (!isInvalidProcessId)
                 {
-                    return true;
+                    using Process process = Process.GetProcessById(nodeData[nodeId].ProcessId);
+                    if (!process.HasExited)
+                    {
+                        return true;
+                    }
+                    
                 }
             }
             catch (ArgumentException)
