@@ -46,29 +46,31 @@ namespace Microsoft.Build.Tasks
         // taking up the whole threadpool esp. when hosted in Visual Studio. IOW we use a specific number
         // instead of int.MaxValue.
         private static readonly int DefaultCopyParallelism = Environment.ProcessorCount; // NativeMethodsShared.GetLogicalCoreCount() > 4 ? 6 : 4;
-        private static readonly Thread[] copyThreads;
-        private static readonly AutoResetEvent[] copyThreadSignals;
-        private readonly AutoResetEvent _signalCopyTasksCompleted;
+        private static Thread[] copyThreads;
+        private static AutoResetEvent[] copyThreadSignals;
+        private AutoResetEvent _signalCopyTasksCompleted;
 
-        private static ConcurrentQueue<Action> _copyActionQueue;
+        private static ConcurrentQueue<Action> _copyActionQueue = new ConcurrentQueue<Action>();
 
-#pragma warning disable CA1810 // Initialize reference type static fields inline
-        static Copy()
-#pragma warning restore CA1810 // Initialize reference type static fields inline
+        private static void InitializeCopyThreads()
         {
-            _copyActionQueue = new ConcurrentQueue<Action>();
-
-            copyThreadSignals = new AutoResetEvent[DefaultCopyParallelism];
-            copyThreads = new Thread[DefaultCopyParallelism];
-            for (int i = 0; i < copyThreads.Length; ++i)
+            lock (_copyActionQueue)
             {
-                AutoResetEvent autoResetEvent = new AutoResetEvent(false);
-                copyThreadSignals[i] = autoResetEvent;
-                Thread newThread = new Thread(ParallelCopyTask);
-                newThread.IsBackground = true;
-                newThread.Name = "Parallel Copy Thread";
-                newThread.Start(autoResetEvent);
-                copyThreads[i] = newThread;
+                if (copyThreads == null)
+                {
+                    copyThreadSignals = new AutoResetEvent[DefaultCopyParallelism];
+                    copyThreads = new Thread[DefaultCopyParallelism];
+                    for (int i = 0; i < copyThreads.Length; ++i)
+                    {
+                        AutoResetEvent autoResetEvent = new AutoResetEvent(false);
+                        copyThreadSignals[i] = autoResetEvent;
+                        Thread newThread = new Thread(ParallelCopyTask);
+                        newThread.IsBackground = true;
+                        newThread.Name = "Parallel Copy Thread";
+                        newThread.Start(autoResetEvent);
+                        copyThreads[i] = newThread;
+                    }
+                }
             }
         }
 
@@ -612,6 +614,12 @@ namespace Microsoft.Build.Tasks
             for (int i = 0; i < DefaultCopyParallelism; ++i)
             {
                 _copyActionQueue.Enqueue(ProcessPartition);
+            }
+
+            InitializeCopyThreads();
+
+            for (int i = 0; i < DefaultCopyParallelism; ++i)
+            {
                 copyThreadSignals[i].Set();
             }
 
