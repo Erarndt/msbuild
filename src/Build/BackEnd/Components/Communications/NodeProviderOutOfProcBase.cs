@@ -633,8 +633,7 @@ namespace Microsoft.Build.BackEnd
             public void BeginAsyncPacketRead()
             {
 #if FEATURE_APM
-                // _clientToServerStream.BeginRead(_headerByte, 0, _headerByte.Length, HeaderReadComplete, this);
-                _ = BeginAsyncPacketReadInternal();
+                _clientToServerStream.BeginRead(_headerByte, 0, _headerByte.Length, HeaderReadComplete, this);
 #else
                 ThreadPool.QueueUserWorkItem(delegate
                 {
@@ -642,93 +641,6 @@ namespace Microsoft.Build.BackEnd
                 });
 #endif
             }
-
-#if FEATURE_APM
-            private async Task BeginAsyncPacketReadInternal()
-            {
-                while (true)
-                {
-                    int bytesRead;
-                    try
-                    {
-                        try
-                        {
-                            bytesRead = await _clientToServerStream.ReadAsync(_headerByte, 0, _headerByte.Length, CancellationToken.None);
-                        }
-
-                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
-                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
-                        catch (ArgumentException)
-                        {
-                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
-                            return;
-                        }
-
-                        if (!ProcessHeaderBytesRead(bytesRead))
-                        {
-                            return;
-                        }
-                    }
-                    catch (IOException e)
-                    {
-                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in HeaderReadComplete: {0}", e);
-                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
-                        Close();
-                        return;
-                    }
-
-                    int packetLength = BinaryPrimitives.ReadInt32LittleEndian(new Span<byte>(_headerByte, 1, 4));
-                    MSBuildEventSource.Log.PacketReadSize(packetLength);
-
-                    // Ensures the buffer is at least this length.
-                    // It avoids reallocations if the buffer is already large enough.
-                    _readBufferMemoryStream.SetLength(packetLength);
-                    byte[] packetData = _readBufferMemoryStream.GetBuffer();
-
-                    NodePacketType packetType = (NodePacketType)_headerByte[0];
-
-                    try
-                    {
-                        try
-                        {
-                            bytesRead = await _clientToServerStream.ReadAsync(packetData, 0, packetLength, CancellationToken.None);
-                        }
-
-                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
-                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
-                        catch (ArgumentException)
-                        {
-                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
-                            return;
-                        }
-
-                        if (!ProcessBodyBytesRead(bytesRead, packetLength, packetType))
-                        {
-                            return;
-                        }
-                    }
-                    catch (IOException e)
-                    {
-                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in BodyReadComplete (Reading): {0}", e);
-                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
-                        Close();
-                        return;
-                    }
-
-                    // Read and route the packet.
-                    if (!ReadAndRoutePacket(packetType, packetData, packetLength))
-                    {
-                        return;
-                    }
-
-                    if (packetType == NodePacketType.NodeShutdown)
-                    {
-                        Close();
-                        return;
-                    }
-                }
-            }
-#endif
 
 #if !FEATURE_APM
             public async Task RunPacketReadLoopAsync()
@@ -825,61 +737,67 @@ namespace Microsoft.Build.BackEnd
                     // average latency between the moment this runs and when the delegate starts
                     // running is about 100-200 microseconds (unless there's thread pool saturation)
                     _packetWriteDrainTask = _packetWriteDrainTask.ContinueWith(
-                        SendDataCoreAsync,
-                        this,
-                        TaskScheduler.Default).Unwrap();
-
-                    static async Task SendDataCoreAsync(Task _, object state)
-                    {
-                        NodeContext context = (NodeContext)state;
-                        while (context._packetWriteQueue.TryDequeue(out var packet))
+                        static (_, state) =>
                         {
-                            MemoryStream writeStream = context._writeBufferMemoryStream;
-
-                            // clear the buffer but keep the underlying capacity to avoid reallocations
-                            writeStream.SetLength(0);
-
-                            ITranslator writeTranslator = BinaryTranslator.GetWriteTranslator(writeStream);
-                            try
+                            NodeContext context = (NodeContext)state;
+                            while (context._packetWriteQueue.TryDequeue(out var packet))
                             {
-                                writeStream.WriteByte((byte)packet.Type);
-
-                                // Pad for the packet length
-                                WriteInt32(writeStream, 0);
-                                packet.Translate(writeTranslator);
-
-                                int writeStreamLength = (int)writeStream.Position;
-
-                                // Now plug in the real packet length
-                                writeStream.Position = 1;
-                                WriteInt32(writeStream, writeStreamLength - 5);
-
-                                byte[] writeStreamBuffer = writeStream.GetBuffer();
-
-                                for (int i = 0; i < writeStreamLength; i += MaxPacketWriteSize)
-                                {
-                                    int lengthToWrite = Math.Min(writeStreamLength - i, MaxPacketWriteSize);
-#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
-                                    await context._serverToClientStream.WriteAsync(writeStreamBuffer, i, lengthToWrite, CancellationToken.None);
-#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
-                                }
-
-                                if (IsExitPacket(packet))
-                                {
-                                    context._exitPacketState = ExitPacketState.ExitPacketSent;
-                                }
+                                context.SendDataCore(packet);
                             }
-                            catch (IOException e)
-                            {
-                                // Do nothing here because any exception will be caught by the async read handler
-                                CommunicationsUtilities.Trace(context._nodeId, "EXCEPTION in SendData: {0}", e);
-                            }
-                            catch (ObjectDisposedException) // This happens if a child dies unexpectedly
-                            {
-                                // Do nothing here because any exception will be caught by the async read handler
-                            }
-                        }
+                        },
+                        this,
+                        TaskScheduler.Default);
+                }
+            }
+
+            /// <summary>
+            /// Actually writes and sends the packet. This can't be called in parallel
+            /// because it reuses the _writeBufferMemoryStream, and this is why we use
+            /// the _packetWriteDrainTask to serially chain invocations one after another.
+            /// </summary>
+            /// <param name="packet">The packet to send.</param>
+            private void SendDataCore(INodePacket packet)
+            {
+                MemoryStream writeStream = _writeBufferMemoryStream;
+
+                // clear the buffer but keep the underlying capacity to avoid reallocations
+                writeStream.SetLength(0);
+
+                ITranslator writeTranslator = BinaryTranslator.GetWriteTranslator(writeStream);
+                try
+                {
+                    writeStream.WriteByte((byte)packet.Type);
+
+                    // Pad for the packet length
+                    WriteInt32(writeStream, 0);
+                    packet.Translate(writeTranslator);
+
+                    int writeStreamLength = (int)writeStream.Position;
+
+                    // Now plug in the real packet length
+                    writeStream.Position = 1;
+                    WriteInt32(writeStream, writeStreamLength - 5);
+
+                    byte[] writeStreamBuffer = writeStream.GetBuffer();
+
+                    for (int i = 0; i < writeStreamLength; i += MaxPacketWriteSize)
+                    {
+                        int lengthToWrite = Math.Min(writeStreamLength - i, MaxPacketWriteSize);
+                        _serverToClientStream.Write(writeStreamBuffer, i, lengthToWrite);
                     }
+                    if (IsExitPacket(packet))
+                    {
+                        _exitPacketState = ExitPacketState.ExitPacketSent;
+                    }
+                }
+                catch (IOException e)
+                {
+                    // Do nothing here because any exception will be caught by the async read handler
+                    CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in SendData: {0}", e);
+                }
+                catch (ObjectDisposedException) // This happens if a child dies unexpectedly
+                {
+                    // Do nothing here because any exception will be caught by the async read handler
                 }
             }
 

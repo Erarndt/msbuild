@@ -519,12 +519,10 @@ namespace Microsoft.Build.BackEnd
             // spammed to the endpoint and it never gets an opportunity to shutdown.
             CommunicationsUtilities.Trace("Entering read loop.");
             byte[] headerByte = new byte[5];
-#if NET451_OR_GREATER
-            Task<int> readTask = localReadPipe.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
-#elif NETCOREAPP
-            Task<int> readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
-#else
+#if FEATURE_APM
             IAsyncResult result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#else
+            Task<int> readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
 #endif
 
             bool exitLoop = false;
@@ -533,10 +531,10 @@ namespace Microsoft.Build.BackEnd
                 // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
                 // packets to be sent by other threads which are shutting down, such as the logging thread.
                 WaitHandle[] handles = new WaitHandle[] {
-#if NET451_OR_GREATER || NETCOREAPP
-                    ((IAsyncResult)readTask).AsyncWaitHandle,
-#else
+#if FEATURE_APM
                     result.AsyncWaitHandle,
+#else
+                    ((IAsyncResult)readTask).AsyncWaitHandle,
 #endif
                     localPacketAvailable, localTerminatePacketPump };
 
@@ -548,10 +546,10 @@ namespace Microsoft.Build.BackEnd
                             int bytesRead = 0;
                             try
                             {
-#if NET451_OR_GREATER || NETCOREAPP
-                                bytesRead = readTask.Result;
-#else
+#if FEATURE_APM
                                 bytesRead = localReadPipe.EndRead(result);
+#else
+                                bytesRead = readTask.Result;
 #endif
                             }
                             catch (Exception e)
@@ -592,7 +590,7 @@ namespace Microsoft.Build.BackEnd
                                 break;
                             }
 
-                            NodePacketType packetType = (NodePacketType)headerByte[0];
+                            NodePacketType packetType = (NodePacketType)Enum.ToObject(typeof(NodePacketType), headerByte[0]);
 
                             try
                             {
@@ -608,12 +606,10 @@ namespace Microsoft.Build.BackEnd
                                 break;
                             }
 
-#if NET451_OR_GREATER
-                            readTask = localReadPipe.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
-#elif NETCOREAPP
-                            readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
-#else
+#if FEATURE_APM
                             result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
+#else
+                            readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
 #endif
                         }
 
