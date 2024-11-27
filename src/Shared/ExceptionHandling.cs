@@ -352,8 +352,7 @@ namespace Microsoft.Build.Shared
                         // because we're a child node with no console to log to, so die
                         Directory.CreateDirectory(DebugDumpPath);
 
-                        using Process currentProcess = Process.GetCurrentProcess();
-                        var pid = currentProcess.Id;
+                        var pid = EnvironmentUtilities.CurrentProcessId;
                         // This naming pattern is assumed in ReadAnyExceptionFromFile
                         s_dumpFileName = Path.Combine(DebugDumpPath, $"MSBuild_pid-{pid}_{guid:n}.failure.txt");
 

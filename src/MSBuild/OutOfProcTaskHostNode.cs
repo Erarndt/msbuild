@@ -861,17 +861,9 @@ namespace Microsoft.Build.CommandLine
 
             static StreamWriter GetDebugWriter(bool debugCommunications)
             {
-                StreamWriter debugWriter;
-                if (debugCommunications)
-                {
-                    using Process currentProcess = Process.GetCurrentProcess();
-                    debugWriter = File.CreateText(string.Format(CultureInfo.CurrentCulture, Path.Combine(FileUtilities.TempFileDirectory, @"MSBuild_NodeShutdown_{0}.txt"), currentProcess.Id));
-                }
-                else
-                {
-                    debugWriter = null;
-                }
-
+                StreamWriter debugWriter = debugCommunications
+                    ? File.CreateText(string.Format(CultureInfo.CurrentCulture, Path.Combine(FileUtilities.TempFileDirectory, @"MSBuild_NodeShutdown_{0}.txt"), EnvironmentUtilities.CurrentProcessId))
+                    : null;
                 return debugWriter;
             }
         }

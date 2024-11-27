@@ -239,8 +239,7 @@ namespace Microsoft.Build.BackEnd
 #endif
             ConcurrentQueue<NodeContext> nodeContexts = new();
             ConcurrentQueue<Exception> exceptions = new();
-            using Process currentProcess = Process.GetCurrentProcess();
-            int currentProcessId = currentProcess.Id;
+            int currentProcessId = EnvironmentUtilities.CurrentProcessId;
             Parallel.For(nextNodeId, nextNodeId + numberOfNodesToCreate, (nodeId) =>
             {
                 try

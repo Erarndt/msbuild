@@ -674,8 +674,7 @@ namespace Microsoft.Build.Evaluation
             if (s_debugLogCacheActivity)
             {
                 string prefix = OutOfProcNode.IsOutOfProcNode ? "C" : "P";
-                using Process currentProcess = Process.GetCurrentProcess();
-                Trace.WriteLine(prefix + " " + currentProcess.Id + " | " + message + param1);
+                Trace.WriteLine(prefix + " " + EnvironmentUtilities.CurrentProcessId + " | " + message + param1);
             }
         }
     }

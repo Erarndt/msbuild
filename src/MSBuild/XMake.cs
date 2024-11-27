@@ -450,7 +450,7 @@ namespace Microsoft.Build.CommandLine
                 using PerformanceCounter counter = new PerformanceCounter(".NET CLR Memory", "Process ID", instance, true);
                 try
                 {
-                    if ((int)counter.RawValue == currentProcess.Id)
+                    if ((int)counter.RawValue == EnvironmentUtilities.CurrentProcessId)
                     {
                         currentInstance = instance;
                         break;
@@ -616,11 +616,8 @@ namespace Microsoft.Build.CommandLine
 #endif
                 case "2":
                     // Sometimes easier to attach rather than deal with JIT prompt
-                    using (Process currentProcess = Process.GetCurrentProcess())
-                    {
-                        Console.WriteLine($"Waiting for debugger to attach ({currentProcess.MainModule.FileName} PID {currentProcess.Id}).  Press enter to continue...");
-                        Console.ReadLine();
-                    }
+                    Console.WriteLine($"Waiting for debugger to attach ({EnvironmentUtilities.ProcessPath} PID {EnvironmentUtilities.CurrentProcessId}).  Press enter to continue...");
+                    Console.ReadLine();
 
                     break;
             }
@@ -1723,13 +1720,12 @@ namespace Microsoft.Build.CommandLine
 
         private static List<BuildManager.DeferredBuildMessage> GetMessagesToLogInBuildLoggers(string commandLineString)
         {
-            using Process currentProcess = Process.GetCurrentProcess();
             List<BuildManager.DeferredBuildMessage> messages = new(s_globalMessagesToLogInBuildLoggers)
             {
                 new BuildManager.DeferredBuildMessage(
                     ResourceUtilities.FormatResourceStringIgnoreCodeAndKeyword(
                         "Process",
-                        currentProcess.MainModule?.FileName ?? string.Empty),
+                        EnvironmentUtilities.ProcessPath ?? string.Empty),
                     MessageImportance.Low),
                 new BuildManager.DeferredBuildMessage(
                     ResourceUtilities.FormatResourceStringIgnoreCodeAndKeyword(
@@ -2520,8 +2516,7 @@ namespace Microsoft.Build.CommandLine
 
                 if (!Debugger.IsAttached)
                 {
-                    using Process currentProcess = Process.GetCurrentProcess();
-                    Console.WriteLine($"Waiting for debugger to attach... ({currentProcess.MainModule.FileName} PID {currentProcess.Id})");
+                    Console.WriteLine($"Waiting for debugger to attach... ({EnvironmentUtilities.ProcessPath} PID {EnvironmentUtilities.CurrentProcessId})");
                     while (!Debugger.IsAttached)
                     {
                         Thread.Sleep(100);

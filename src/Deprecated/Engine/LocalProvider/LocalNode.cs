@@ -12,6 +12,7 @@ using System.IO;
 using System.Security.AccessControl;
 using System.Threading;
 using Microsoft.Build.BuildEngine.Shared;
+using Microsoft.Build.Shared;
 
 namespace Microsoft.Build.BuildEngine
 {
@@ -535,9 +536,8 @@ namespace Microsoft.Build.BuildEngine
             node = new Node(nodeId, nodeLoggers, engineCallback, parentGlobalProperties, toolsetSearchLocations, parentStartupDirectory);
 
             // Write the initialization complete event out directly
-            using Process currentProcess = Process.GetCurrentProcess();
             LocalCallDescriptorForInitializationComplete callDescriptor =
-                new LocalCallDescriptorForInitializationComplete(currentProcess.Id);
+                new LocalCallDescriptorForInitializationComplete(EnvironmentUtilities.CurrentProcessId);
 
             // Post the message indicating that the initialization is complete
             engineCallback.PostMessageToParent(callDescriptor, true);

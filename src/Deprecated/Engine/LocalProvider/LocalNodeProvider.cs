@@ -14,6 +14,7 @@ using System.Globalization;
 using System.IO;
 using Microsoft.Build.BuildEngine.Shared;
 using System.Runtime.InteropServices;
+using Microsoft.Build.Shared;
 
 namespace Microsoft.Build.BuildEngine
 {
@@ -690,9 +691,8 @@ namespace Microsoft.Build.BuildEngine
                         IDictionary variableDictionary = Environment.GetEnvironmentVariables();
                         Hashtable environmentVariablesTable = new Hashtable(variableDictionary);
 
-                        using Process currentProcess = Process.GetCurrentProcess();
                         LocalCallDescriptorForInitializeNode callDescriptorInit =
-                                new LocalCallDescriptorForInitializeNode(environmentVariablesTable, nodeLoggers.ToArray(), nodeData[nodeIndex].NodeId, parentGlobalProperties, toolsetSearchLocations, currentProcess.Id, startupDirectory);
+                                new LocalCallDescriptorForInitializeNode(environmentVariablesTable, nodeLoggers.ToArray(), nodeData[nodeIndex].NodeId, parentGlobalProperties, toolsetSearchLocations, EnvironmentUtilities.CurrentProcessId, startupDirectory);
                         nodeData[nodeIndex].NodeCommandQueue.Enqueue(callDescriptorInit);
 
                         EventWaitHandle nodeInUseEvent = new EventWaitHandle(false, EventResetMode.ManualReset, LocalNodeProviderGlobalNames.NodeInUseEventName(nodeData[nodeIndex].NodeNumber));

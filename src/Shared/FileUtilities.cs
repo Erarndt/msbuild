@@ -128,8 +128,7 @@ namespace Microsoft.Build.Shared
         {
             if (cacheDirectory == null)
             {
-                using Process currentProcess = Process.GetCurrentProcess();
-                cacheDirectory = Path.Combine(TempFileDirectory, string.Format(CultureInfo.CurrentUICulture, "MSBuild{0}-{1}", currentProcess.Id, AppDomain.CurrentDomain.Id));
+                cacheDirectory = Path.Combine(TempFileDirectory, string.Format(CultureInfo.CurrentUICulture, "MSBuild{0}-{1}", EnvironmentUtilities.CurrentProcessId, AppDomain.CurrentDomain.Id));
             }
 
             return cacheDirectory;
@@ -183,8 +182,7 @@ namespace Microsoft.Build.Shared
                 string testFilePath = Path.Combine(directory, $"MSBuild_{Guid.NewGuid().ToString("N")}_testFile.txt");
                 FileInfo file = new(testFilePath);
                 file.Directory.Create(); // If the directory already exists, this method does nothing.
-                using Process currentProcess = Process.GetCurrentProcess();
-                File.WriteAllText(testFilePath, $"MSBuild process {currentProcess.Id} successfully wrote to file.");
+                File.WriteAllText(testFilePath, $"MSBuild process {EnvironmentUtilities.CurrentProcessId} successfully wrote to file.");
                 File.Delete(testFilePath);
                 return true;
             }

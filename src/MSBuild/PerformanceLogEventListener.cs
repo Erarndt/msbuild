@@ -79,8 +79,7 @@ namespace Microsoft.Build.CommandLine
 
         internal void Initialize(string logDirectory)
         {
-            using Process currentProcess = Process.GetCurrentProcess();
-            _processIDStr = currentProcess.Id.ToString();
+            _processIDStr = EnvironmentUtilities.CurrentProcessId.ToString();
 
             // Use a GUID disambiguator to make sure that we have a unique file name.
             string logFilePath = Path.Combine(logDirectory, $"perf-{_processIDStr}-{Guid.NewGuid().ToString("N")}.log");
