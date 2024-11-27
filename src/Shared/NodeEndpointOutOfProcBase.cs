@@ -64,6 +64,17 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         private object _asyncDataMonitor;
 
+#if NET471_OR_GREATER || NETCOREAPP
+        /// <summary>
+        /// Set when a packet is available in the packet queue
+        /// </summary>
+        private AsyncAutoResetEvent _packetAvailable;
+
+        /// <summary>
+        /// Set when the asynchronous packet pump should terminate
+        /// </summary>
+        private AsyncAutoResetEvent _terminatePacketPump;
+#else
         /// <summary>
         /// Set when a packet is available in the packet queue
         /// </summary>
@@ -73,6 +84,7 @@ namespace Microsoft.Build.BackEnd
         /// Set when the asynchronous packet pump should terminate
         /// </summary>
         private AutoResetEvent _terminatePacketPump;
+#endif
 
         /// <summary>
         /// True if this side is gracefully disconnecting.
@@ -115,7 +127,7 @@ namespace Microsoft.Build.BackEnd
         /// </summary>
         private BinaryWriter _binaryWriter;
 
-        #endregion
+#endregion
 
         #region INodeEndpoint Events
 
@@ -298,7 +310,9 @@ namespace Microsoft.Build.BackEnd
 #if CLR2COMPATIBILITY
             _terminatePacketPump.Close();
 #else
+#if !NET472_OR_GREATER && !NETCOREAPP
             _terminatePacketPump.Dispose();
+#endif
 #endif
             _pipeServer.Dispose();
             _packetPump = null;
@@ -331,8 +345,13 @@ namespace Microsoft.Build.BackEnd
                 _packetPump = new Thread(PacketPumpProc);
                 _packetPump.IsBackground = true;
                 _packetPump.Name = "OutOfProc Endpoint Packet Pump";
+#if NET472_OR_GREATER || NETCOREAPP
+                _packetAvailable = new AsyncAutoResetEvent();
+                _terminatePacketPump = new AsyncAutoResetEvent();
+#else
                 _packetAvailable = new AutoResetEvent(false);
                 _terminatePacketPump = new AutoResetEvent(false);
+#endif
                 _packetQueue = new ConcurrentQueue<INodePacket>();
                 _packetPump.Start();
             }
@@ -347,8 +366,13 @@ namespace Microsoft.Build.BackEnd
         {
             NamedPipeServerStream localPipeServer = _pipeServer;
 
+#if NET471_OR_GREATER || NETCOREAPP
+            AsyncAutoResetEvent localPacketAvailable = _packetAvailable;
+            AsyncAutoResetEvent localTerminatePacketPump = _terminatePacketPump;
+#else
             AutoResetEvent localPacketAvailable = _packetAvailable;
             AutoResetEvent localTerminatePacketPump = _terminatePacketPump;
+#endif
             ConcurrentQueue<INodePacket> localPacketQueue = _packetQueue;
 
             DateTime originalWaitStartTime = DateTime.UtcNow;
@@ -483,10 +507,17 @@ namespace Microsoft.Build.BackEnd
                 }
             }
 
+#if NET471_OR_GREATER || NETCOREAPP
+            RunReadLoopAsync(
+                new BufferedReadStream(_pipeServer),
+                _pipeServer,
+                localPacketQueue, localPacketAvailable, localTerminatePacketPump).GetAwaiter().GetResult();
+#else
             RunReadLoop(
                 new BufferedReadStream(_pipeServer),
                 _pipeServer,
                 localPacketQueue, localPacketAvailable, localTerminatePacketPump);
+#endif
 
             CommunicationsUtilities.Trace("Ending read loop");
 
@@ -510,8 +541,9 @@ namespace Microsoft.Build.BackEnd
             }
         }
 
-        private void RunReadLoop(BufferedReadStream localReadPipe, NamedPipeServerStream localWritePipe,
-            ConcurrentQueue<INodePacket> localPacketQueue, AutoResetEvent localPacketAvailable, AutoResetEvent localTerminatePacketPump)
+#if NET471_OR_GREATER || NETCOREAPP
+        private async Task RunReadLoopAsync(BufferedReadStream localReadPipe, NamedPipeServerStream localWritePipe,
+            ConcurrentQueue<INodePacket> localPacketQueue, AsyncAutoResetEvent localPacketAvailable, AsyncAutoResetEvent localTerminatePacketPump)
         {
             // Ordering of the wait handles is important.  The first signalled wait handle in the array
             // will be returned by WaitAny if multiple wait handles are signalled.  We prefer to have the
@@ -523,24 +555,29 @@ namespace Microsoft.Build.BackEnd
             Task<int> readTask = localReadPipe.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
 #elif NETCOREAPP
             Task<int> readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
-#else
-            IAsyncResult result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
 #endif
+            // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
+            // packets to be sent by other threads which are shutting down, such as the logging thread.
+            Task[] handles = [
+                readTask,
+                localPacketAvailable.WaitAsync(),
+                localTerminatePacketPump.WaitAsync()
+            ];
 
             bool exitLoop = false;
             do
             {
-                // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
-                // packets to be sent by other threads which are shutting down, such as the logging thread.
-                WaitHandle[] handles = new WaitHandle[] {
-#if NET451_OR_GREATER || NETCOREAPP
-                    ((IAsyncResult)readTask).AsyncWaitHandle,
-#else
-                    result.AsyncWaitHandle,
-#endif
-                    localPacketAvailable, localTerminatePacketPump };
+                Task completedTask = await Task.WhenAny(handles);
+                int waitId = -1;
+                for (int i = 0; i < handles.Length; ++i)
+                {
+                    if (completedTask == handles[i])
+                    {
+                        waitId = i;
+                        break;
+                    }
+                }
 
-                int waitId = WaitHandle.WaitAny(handles);
                 switch (waitId)
                 {
                     case 0:
@@ -548,11 +585,7 @@ namespace Microsoft.Build.BackEnd
                             int bytesRead = 0;
                             try
                             {
-#if NET451_OR_GREATER || NETCOREAPP
-                                bytesRead = readTask.Result;
-#else
-                                bytesRead = localReadPipe.EndRead(result);
-#endif
+                                bytesRead = await readTask;
                             }
                             catch (Exception e)
                             {
@@ -612,9 +645,165 @@ namespace Microsoft.Build.BackEnd
                             readTask = localReadPipe.ReadAsync(headerByte, 0, headerByte.Length, CancellationToken.None);
 #elif NETCOREAPP
                             readTask = CommunicationsUtilities.ReadAsync(localReadPipe, headerByte, headerByte.Length);
-#else
-                            result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
 #endif
+                            handles[0] = readTask;
+                        }
+
+                        break;
+
+                    case 1:
+                    case 2:
+                        try
+                        {
+                            // Write out all the queued packets.
+                            INodePacket packet;
+                            while (localPacketQueue.TryDequeue(out packet))
+                            {
+                                var packetStream = _packetStream;
+                                packetStream.SetLength(0);
+
+                                ITranslator writeTranslator = BinaryTranslator.GetWriteTranslator(packetStream);
+
+                                packetStream.WriteByte((byte)packet.Type);
+
+                                // Pad for packet length
+                                _binaryWriter.Write(0);
+
+                                // Reset the position in the write buffer.
+                                packet.Translate(writeTranslator);
+
+                                int packetStreamLength = (int)packetStream.Position;
+
+                                // Now write in the actual packet length
+                                packetStream.Position = 1;
+                                _binaryWriter.Write(packetStreamLength - 5);
+
+#pragma warning disable CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                                await localWritePipe.WriteAsync(packetStream.GetBuffer(), 0, packetStreamLength, CancellationToken.None);
+#pragma warning restore CA1835 // Prefer the 'Memory'-based overloads for 'ReadAsync' and 'WriteAsync'
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            // Error while deserializing or handling packet.  Abort.
+                            CommunicationsUtilities.Trace("Exception while serializing packets: {0}", e);
+                            ExceptionHandling.DumpExceptionToFile(e);
+                            ChangeLinkStatus(LinkStatus.Failed);
+                            exitLoop = true;
+                            break;
+                        }
+
+                        if (waitId == 1)
+                        {
+                            handles[1] = localPacketAvailable.WaitAsync();
+                        }
+                        else if (waitId == 2)
+                        {
+                            handles[2] = localTerminatePacketPump.WaitAsync();
+                        }
+
+                        if (waitId == 2)
+                        {
+                            CommunicationsUtilities.Trace("Disconnecting voluntarily");
+                            ChangeLinkStatus(LinkStatus.Failed);
+                            exitLoop = true;
+                        }
+
+                        break;
+
+                    default:
+                        ErrorUtilities.ThrowInternalError("waitId {0} out of range.", waitId);
+                        break;
+                }
+            }
+            while (!exitLoop);
+        }
+#else
+private void RunReadLoop(BufferedReadStream localReadPipe, NamedPipeServerStream localWritePipe,
+            ConcurrentQueue<INodePacket> localPacketQueue, AutoResetEvent localPacketAvailable, AutoResetEvent localTerminatePacketPump)
+        {
+            // Ordering of the wait handles is important.  The first signalled wait handle in the array
+            // will be returned by WaitAny if multiple wait handles are signalled.  We prefer to have the
+            // terminate event triggered so that we cannot get into a situation where packets are being
+            // spammed to the endpoint and it never gets an opportunity to shutdown.
+            CommunicationsUtilities.Trace("Entering read loop.");
+            byte[] headerByte = new byte[5];
+            IAsyncResult result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
+
+            bool exitLoop = false;
+            do
+            {
+                // Ordering is important.  We want packetAvailable to supercede terminate otherwise we will not properly wait for all
+                // packets to be sent by other threads which are shutting down, such as the logging thread.
+                WaitHandle[] handles = new WaitHandle[] {
+                    result.AsyncWaitHandle,
+                    localPacketAvailable, localTerminatePacketPump };
+
+                int waitId = WaitHandle.WaitAny(handles);
+                switch (waitId)
+                {
+                    case 0:
+                        {
+                            int bytesRead = 0;
+                            try
+                            {
+                                bytesRead = localReadPipe.EndRead(result);
+                            }
+                            catch (Exception e)
+                            {
+                                // Lost communications.  Abort (but allow node reuse)
+                                CommunicationsUtilities.Trace("Exception reading from server.  {0}", e);
+                                ExceptionHandling.DumpExceptionToFile(e);
+                                ChangeLinkStatus(LinkStatus.Inactive);
+                                exitLoop = true;
+                                break;
+                            }
+
+                            if (bytesRead != headerByte.Length)
+                            {
+                                // Incomplete read.  Abort.
+                                if (bytesRead == 0)
+                                {
+                                    if (_isClientDisconnecting)
+                                    {
+                                        CommunicationsUtilities.Trace("Parent disconnected gracefully.");
+                                        // Do not change link status to failed as this could make node think connection has failed
+                                        // and recycle node, while this is perfectly expected and handled race condition
+                                        // (both client and node is about to close pipe and client can be faster).
+                                    }
+                                    else
+                                    {
+                                        CommunicationsUtilities.Trace("Parent disconnected abruptly.");
+                                        ChangeLinkStatus(LinkStatus.Failed);
+                                    }
+                                }
+                                else
+                                {
+                                    CommunicationsUtilities.Trace("Incomplete header read from server.  {0} of {1} bytes read", bytesRead, headerByte.Length);
+                                    ChangeLinkStatus(LinkStatus.Failed);
+                                }
+
+                                exitLoop = true;
+                                break;
+                            }
+
+                            NodePacketType packetType = (NodePacketType)headerByte[0];
+
+                            try
+                            {
+                                _packetFactory.DeserializeAndRoutePacket(0, packetType, BinaryTranslator.GetReadTranslator(localReadPipe, _sharedReadBuffer));
+                            }
+                            catch (Exception e)
+                            {
+                                // Error while deserializing or handling packet.  Abort.
+                                CommunicationsUtilities.Trace("Exception while deserializing packet {0}: {1}", packetType, e);
+                                ExceptionHandling.DumpExceptionToFile(e);
+                                ChangeLinkStatus(LinkStatus.Failed);
+                                exitLoop = true;
+                                break;
+                            }
+
+                            result = localReadPipe.BeginRead(headerByte, 0, headerByte.Length, null, null);
                         }
 
                         break;
@@ -675,9 +864,57 @@ namespace Microsoft.Build.BackEnd
             }
             while (!exitLoop);
         }
+#endif
 
-        #endregion
+#endregion
 
-        #endregion
+#endregion
     }
+
+#if NET451_OR_GREATER || NETCOREAPP
+    internal sealed class AsyncAutoResetEvent
+    {
+        private readonly System.Collections.Generic.Queue<TaskCompletionSource<bool>> _waits = new();
+        private bool _signaled;
+
+        public Task WaitAsync()
+        {
+            lock (_waits)
+            {
+                if (_signaled)
+                {
+                    _signaled = false;
+
+                    return Task.CompletedTask;
+                }
+                else
+                {
+                    var tcs = new TaskCompletionSource<bool>();
+                    _waits.Enqueue(tcs);
+
+                    return tcs.Task;
+                }
+            }
+        }
+
+        public void Set()
+        {
+            TaskCompletionSource<bool> toRelease = null;
+
+            lock (_waits)
+            {
+                if (_waits.Count > 0)
+                {
+                    toRelease = _waits.Dequeue();
+                }
+                else if (!_signaled)
+                {
+                    _signaled = true;
+                }
+            }
+
+            toRelease?.SetResult(true);
+        }
+    }
+#endif
 }
