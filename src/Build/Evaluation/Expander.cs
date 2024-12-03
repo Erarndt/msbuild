@@ -2439,7 +2439,7 @@ namespace Microsoft.Build.Evaluation
                             ProjectErrorUtilities.ThrowInvalidProject(elementLocation, "InvalidItemFunctionExpression", functionName, item.Key, e.Message);
                         }
 
-                        if (File.Exists(rootedPath) || Directory.Exists(rootedPath))
+                        if (NativeMethods.FileOrDirectoryExists(rootedPath))
                         {
                             yield return item;
                         }
