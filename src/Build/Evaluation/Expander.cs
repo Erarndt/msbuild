@@ -2322,7 +2322,7 @@ namespace Microsoft.Build.Evaluation
                 internal static IEnumerable<KeyValuePair<string, S>> GetItemPairEnumerable(IEnumerable<S> itemsOfType)
                 {
                     // iterate over the items, and yield out items in the tuple format
-                    foreach (var item in itemsOfType.GetStructEnumerable())
+                    foreach (var item in itemsOfType)
                     {
                         if (Traits.Instance.UseLazyWildCardEvaluation)
                         {

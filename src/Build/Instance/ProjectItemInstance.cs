@@ -1104,12 +1104,36 @@ namespace Microsoft.Build.Execution
 
             private IEnumerable<KeyValuePair<string, string>> EnumerateMetadata(ICopyOnWritePropertyDictionary<ProjectMetadataInstance> list)
             {
-                foreach (var kvp in (IDictionary<string, ProjectMetadataInstance>)list)
+                if (list is CopyOnWritePropertyDictionary<ProjectMetadataInstance> copyOnWritePropertyDictionary)
                 {
-                    var projectMetadataInstance = kvp.Value;
-                    if (projectMetadataInstance != null)
+                    return EnumerateCopyOnWritePropertyDictionary(copyOnWritePropertyDictionary);
+                }
+                else
+                {
+                    return EnumerateDictionary(list);
+                }
+
+                static IEnumerable<KeyValuePair<string, string>> EnumerateCopyOnWritePropertyDictionary(CopyOnWritePropertyDictionary<ProjectMetadataInstance> copyOnWritePropertyDictionary)
+                {
+                    foreach (var kvp in copyOnWritePropertyDictionary)
                     {
-                        yield return new KeyValuePair<string, string>(projectMetadataInstance.Name, projectMetadataInstance.EvaluatedValue);
+                        var projectMetadataInstance = kvp.Value;
+                        if (projectMetadataInstance != null)
+                        {
+                            yield return new KeyValuePair<string, string>(projectMetadataInstance.Name, projectMetadataInstance.EvaluatedValue);
+                        }
+                    }
+                }
+
+                static IEnumerable<KeyValuePair<string, string>> EnumerateDictionary(ICopyOnWritePropertyDictionary<ProjectMetadataInstance> list)
+                {
+                    foreach (var kvp in (IDictionary<string, ProjectMetadataInstance>)list)
+                    {
+                        var projectMetadataInstance = kvp.Value;
+                        if (projectMetadataInstance != null)
+                        {
+                            yield return new KeyValuePair<string, string>(projectMetadataInstance.Name, projectMetadataInstance.EvaluatedValue);
+                        }
                     }
                 }
             }
