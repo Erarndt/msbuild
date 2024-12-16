@@ -633,7 +633,8 @@ namespace Microsoft.Build.BackEnd
             public void BeginAsyncPacketRead()
             {
 #if FEATURE_APM
-                _clientToServerStream.BeginRead(_headerByte, 0, _headerByte.Length, HeaderReadComplete, this);
+                // _clientToServerStream.BeginRead(_headerByte, 0, _headerByte.Length, HeaderReadComplete, this);
+                _ = BeginAsyncPacketReadInternal();
 #else
                 ThreadPool.QueueUserWorkItem(delegate
                 {
@@ -641,6 +642,93 @@ namespace Microsoft.Build.BackEnd
                 });
 #endif
             }
+
+#if FEATURE_APM
+            private async Task BeginAsyncPacketReadInternal()
+            {
+                while (true)
+                {
+                    int bytesRead;
+                    try
+                    {
+                        try
+                        {
+                            bytesRead = await _clientToServerStream.ReadAsync(_headerByte, 0, _headerByte.Length, CancellationToken.None);
+                        }
+
+                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                        catch (ArgumentException)
+                        {
+                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                            return;
+                        }
+
+                        if (!ProcessHeaderBytesRead(bytesRead))
+                        {
+                            return;
+                        }
+                    }
+                    catch (IOException e)
+                    {
+                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in HeaderReadComplete: {0}", e);
+                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                        Close();
+                        return;
+                    }
+
+                    int packetLength = BinaryPrimitives.ReadInt32LittleEndian(new Span<byte>(_headerByte, 1, 4));
+                    MSBuildEventSource.Log.PacketReadSize(packetLength);
+
+                    // Ensures the buffer is at least this length.
+                    // It avoids reallocations if the buffer is already large enough.
+                    _readBufferMemoryStream.SetLength(packetLength);
+                    byte[] packetData = _readBufferMemoryStream.GetBuffer();
+
+                    NodePacketType packetType = (NodePacketType)_headerByte[0];
+
+                    try
+                    {
+                        try
+                        {
+                            bytesRead = await _clientToServerStream.ReadAsync(packetData, 0, packetLength, CancellationToken.None);
+                        }
+
+                        // Workaround for CLR stress bug; it sporadically calls us twice on the same async
+                        // result, and EndRead will throw on the second one. Pretend the second one never happened.
+                        catch (ArgumentException)
+                        {
+                            CommunicationsUtilities.Trace(_nodeId, "Hit CLR bug #825607: called back twice on same async result; ignoring");
+                            return;
+                        }
+
+                        if (!ProcessBodyBytesRead(bytesRead, packetLength, packetType))
+                        {
+                            return;
+                        }
+                    }
+                    catch (IOException e)
+                    {
+                        CommunicationsUtilities.Trace(_nodeId, "EXCEPTION in BodyReadComplete (Reading): {0}", e);
+                        _packetFactory.RoutePacket(_nodeId, new NodeShutdown(NodeShutdownReason.ConnectionFailed));
+                        Close();
+                        return;
+                    }
+
+                    // Read and route the packet.
+                    if (!ReadAndRoutePacket(packetType, packetData, packetLength))
+                    {
+                        return;
+                    }
+
+                    if (packetType == NodePacketType.NodeShutdown)
+                    {
+                        Close();
+                        return;
+                    }
+                }
+            }
+#endif
 
 #if !FEATURE_APM
             public async Task RunPacketReadLoopAsync()
