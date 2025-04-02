@@ -78,7 +78,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.Build.BuildCheck.
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.Build.Templates", "template_feed\Microsoft.Build.Templates.csproj", "{A86EE74A-AEF0-42ED-A5A7-7A54BC0773D8}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRDetourWrapper", "..\Detours\CLRDetourWrapper\CLRDetourWrapper.vcxproj", "{4554FBF3-563E-DC03-8ECA-4D3AE24BA9A0}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRDetourWrapper", "src\Detours\CLRDetourWrapper\CLRDetourWrapper.vcxproj", "{4554FBF3-563E-DC03-8ECA-4D3AE24BA9A0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
