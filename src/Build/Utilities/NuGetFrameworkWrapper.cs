@@ -77,31 +77,29 @@ namespace Microsoft.Build.Evaluation
             AllFrameworkVersionsProperty = NuGetFramework.GetProperty("AllFrameworkVersions");
         }
 
-        private object Parse(string tfm)
+        private Microsoft.Build.Utilities.NuGetFramework Parse(string tfm)
         {
-            return ParseMethod.Invoke(null, [tfm]);
+            return Microsoft.Build.Utilities.NuGetFramework.Parse(tfm);
         }
 
         public string GetTargetFrameworkIdentifier(string tfm)
         {
-            return FrameworkProperty.GetValue(Parse(tfm)) as string;
+            return Parse(tfm).Framework;
         }
 
         public string GetTargetFrameworkVersion(string tfm, int minVersionPartCount)
         {
-            var version = VersionProperty.GetValue(Parse(tfm)) as Version;
-            return GetNonZeroVersionParts(version, minVersionPartCount);
+            return GetNonZeroVersionParts(Parse(tfm).Version, minVersionPartCount);
         }
 
         public string GetTargetPlatformIdentifier(string tfm)
         {
-            return PlatformProperty.GetValue(Parse(tfm)) as string;
+            return Parse(tfm).Platform;
         }
 
         public string GetTargetPlatformVersion(string tfm, int minVersionPartCount)
         {
-            var version = PlatformVersionProperty.GetValue(Parse(tfm)) as Version;
-            return GetNonZeroVersionParts(version, minVersionPartCount);
+            return GetNonZeroVersionParts(Parse(tfm).PlatformVersion, minVersionPartCount);
         }
 
         public bool IsCompatible(string target, string candidate)
@@ -117,8 +115,8 @@ namespace Microsoft.Build.Evaluation
 
         public string FilterTargetFrameworks(string incoming, string filter)
         {
-            IEnumerable<(string originalTfm, object parsedTfm)> incomingFrameworks = ParseTfms(incoming);
-            IEnumerable<(string originalTfm, object parsedTfm)> filterFrameworks = ParseTfms(filter);
+            IEnumerable<(string originalTfm, Microsoft.Build.Utilities.NuGetFramework parsedTfm)> incomingFrameworks = ParseTfms(incoming);
+            IEnumerable<(string originalTfm, Microsoft.Build.Utilities.NuGetFramework parsedTfm)> filterFrameworks = ParseTfms(filter);
             StringBuilder tfmList = new StringBuilder();
 
             // An incoming target framework from 'incoming' is kept if it is compatible with any of the desired target frameworks on 'filter'
@@ -142,11 +140,11 @@ namespace Microsoft.Build.Evaluation
 
             return tfmList.ToString();
 
-            IEnumerable<(string originalTfm, object parsedTfm)> ParseTfms(string desiredTargetFrameworks)
+            IEnumerable<(string originalTfm, Microsoft.Build.Utilities.NuGetFramework parsedTfm)> ParseTfms(string desiredTargetFrameworks)
             {
                 return desiredTargetFrameworks.Split([';'], StringSplitOptions.RemoveEmptyEntries).Select(tfm =>
                 {
-                    (string originalTfm, object parsedTfm) parsed = (tfm, Parse(tfm));
+                    (string originalTfm, Microsoft.Build.Utilities.NuGetFramework parsedTfm) parsed = (tfm, Parse(tfm));
                     return parsed;
                 });
             }
